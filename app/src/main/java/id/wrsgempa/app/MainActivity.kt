@@ -507,7 +507,7 @@ private fun MapPage(lastUpdated: String, fg: Color, padding: PaddingValues, open
     LaunchedEffect(lastUpdated) { monitorWebView?.reload() }
     Column(Modifier.fillMaxSize().padding(padding)) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-            Header(fg, "Monitoring Gempa Realtime", "Tampilan InaTEWS BMKG • aliran kejadian")
+            Header(fg, "Monitoring Gempa Realtime", "Peta langsung dari WRS GEMPA milikmu")
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(color = Color(0xFFDDF7EA), shape = RoundedCornerShape(20.dp)) {
                     Text("● LIVE INA-TEWS", color = Color(0xFF11774A), fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp))
@@ -532,7 +532,7 @@ private fun MapPage(lastUpdated: String, fg: Color, padding: PaddingValues, open
                     settings.loadWithOverviewMode = true
                     settings.useWideViewPort = true
                     settings.builtInZoomControls = false
-                    loadUrl("https://inatews.bmkg.go.id/web/realtime")
+                    loadUrl("https://wrsgempa.netlify.app/")
                 }
             }
         )
