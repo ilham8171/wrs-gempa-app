@@ -568,6 +568,7 @@ private fun SettingsRow(icon: androidx.compose.ui.graphics.vector.ImageVector, l
 @Composable
 private fun NearbyPage(quakes: List<Quake>, fg: Color, card: Color, padding: PaddingValues, open: (Quake) -> Unit) {
     val context = LocalContext.current
+    val locationPrefs = remember { context.getSharedPreferences("wrs_alerts", Context.MODE_PRIVATE) }
     var userLocation by remember { mutableStateOf<Location?>(null) }
     var locationMessage by remember { mutableStateOf("Izinkan akses lokasi untuk menghitung jarak gempa.") }
     fun readLocation() {
@@ -583,6 +584,7 @@ private fun NearbyPage(quakes: List<Quake>, fg: Color, card: Color, padding: Pad
             userLocation = providers.mapNotNull { provider ->
                 try { manager.getLastKnownLocation(provider) } catch (_: Exception) { null }
             }.maxByOrNull { it.time }
+            userLocation?.let { locationPrefs.edit().putString("user_lat", it.latitude.toString()).putString("user_lon", it.longitude.toString()).apply() }
             locationMessage = if (userLocation == null) "Lokasi belum tersedia. Aktifkan Lokasi/GPS lalu coba lagi." else
                 "Lokasi ditemukan: %.4f, %.4f".format(userLocation!!.latitude, userLocation!!.longitude)
         } catch (_: Exception) {
