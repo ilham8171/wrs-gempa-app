@@ -219,7 +219,7 @@ private fun saveHistory(prefs: android.content.SharedPreferences, items: List<Qu
 
 private fun isTsunamiPotential(q: Quake): Boolean {
     val s = q.tsunami.lowercase()
-    return s.contains("berpotensi tsunami") && !s.contains("tidak berpotensi tsunami")
+    return (s.contains("berpotensi tsunami") && !s.contains("tidak berpotensi tsunami")) || s.contains("warning tsunami") || s.contains("peringatan dini tsunami")
 }
 
 private fun tsunamiStatus(q: Quake?): Pair<String, Color> {
@@ -266,7 +266,7 @@ private fun WrsGempaApp() {
             val tsunamiItems = (0 until tsunamiJson.length()).mapNotNull { i ->
                 val item = tsunamiJson.optJSONObject(i) ?: return@mapNotNull null
                 val normalized = JSONObject().apply {
-                    put("key", item.optString("key", item.optString("eventid", "tsunami-" + i))
+                    put("key", item.optString("key", item.optString("eventid", "tsunami-" + i)))
                     put("magnitude", item.optDouble("magnitude", 0.0))
                     put("lat", item.optDouble("lat", Double.NaN))
                     put("lon", item.optDouble("lon", Double.NaN))
@@ -476,7 +476,7 @@ private fun HomePage(
             }
             if (error.isNotBlank()) Text(error, color = Color(0xFFD32F2F), fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
         }
-        item { Text("Sumber data: BMKG. Untuk keselamatan dan status peringatan, ikuti BMKG/InaTEWS.", color = fg.copy(alpha = .65f), fontSize = 11.sp) }
+        item { Text("Data terpadu WRS GEMPA • sumber kejadian ditampilkan sesuai data yang diterima. Untuk keselamatan, ikuti peringatan resmi.", color = fg.copy(alpha = .65f), fontSize = 11.sp) }
     }
 }
 
@@ -546,7 +546,7 @@ private fun MapPage(lastUpdated: String, fg: Color, padding: PaddingValues, open
             Header(fg, "Monitoring Gempa Realtime", "Peta langsung dari WRS GEMPA milikmu")
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(color = Color(0xFFDDF7EA), shape = RoundedCornerShape(20.dp)) {
-                    Text("● LIVE INA-TEWS", color = Color(0xFF11774A), fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp))
+                    Text("LIVE • WRS GEMPA", color = Color(0xFF11774A), fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp))
                 }
                 Spacer(Modifier.width(8.dp))
                 Text("Auto refresh 60 detik • Update " + lastUpdated + " WIB", color = fg.copy(alpha = .68f), fontSize = 10.sp)
@@ -572,7 +572,7 @@ private fun MapPage(lastUpdated: String, fg: Color, padding: PaddingValues, open
                 }
             }
         )
-        Text("Sumber resmi: InaTEWS BMKG • Peta © OpenStreetMap/CARTO", color = fg.copy(alpha = .55f), fontSize = 9.sp, modifier = Modifier.padding(8.dp))
+        Text("Monitoring WRS GEMPA • Data dari backend Netlify milikmu", color = fg.copy(alpha = .55f), fontSize = 9.sp, modifier = Modifier.padding(8.dp))
     }
 }
 
@@ -587,7 +587,7 @@ private fun DetailPage(quake: Quake, fg: Color, card: Color, back: () -> Unit, p
                 IconButton(onClick = back) { Icon(Icons.Default.ArrowBack, null, tint = fg) }
                 Column(Modifier.weight(1f)) {
                     Text("Detail Gempa", color = fg, fontSize = 21.sp, fontWeight = FontWeight.Bold)
-                    Text("Informasi terstruktur dari BMKG", color = fg.copy(alpha = .6f), fontSize = 11.sp)
+                    Text("Detail kejadian dari sistem WRS GEMPA", color = fg.copy(alpha = .6f), fontSize = 11.sp)
                 }
             }
         }
@@ -608,7 +608,7 @@ private fun DetailPage(quake: Quake, fg: Color, card: Color, back: () -> Unit, p
                     Spacer(Modifier.height(12.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = {
-                            ShareUtils.shareBitmap(context, ShareUtils.quakeBitmap(quake), "wrs_gempa", "Bagikan info gempa")
+                            ShareUtils.shareBitmap(context, ShareUtils.quakeBitmap(quake), "wrs_gempa", "Bagikan info gempa", "WRS GEMPA • Gempa M ${quake.magnitude} — ${quake.location}\nWaktu: ${quake.date} ${quake.time}\nKoordinat: ${quake.coordinates}\nKedalaman: ${quake.depth}\nPotensi: ${quake.tsunami}\n\nData terpadu WRS GEMPA.")
                         }, modifier = Modifier.weight(1f)) {
                             Icon(Icons.Default.Share, null); Spacer(Modifier.width(4.dp)); Text("Bagikan")
                         }
@@ -632,7 +632,7 @@ private fun DetailPage(quake: Quake, fg: Color, card: Color, back: () -> Unit, p
                     DetailLine("Magnitudo", "M " + quake.magnitude, fg)
                     DetailLine("Dirasakan", quake.felt.ifBlank { "Tidak ada data dirasakan" }, fg)
                     DetailLine("Potensi tsunami", quake.tsunami.ifBlank { "Tidak ada keterangan" }, fg)
-                    DetailLine("Sumber", "BMKG", fg)
+                    DetailLine("Sumber", "WRS GEMPA • BMKG / InaTEWS / USGS sesuai data kejadian", fg)
                     Text(status, color = if (isTsunamiPotential(quake)) TsunamiRed else Color(0xFF147A51), fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(top = 8.dp))
                 }
             }
@@ -804,7 +804,7 @@ private fun MorePage(fg: Color, card: Color, dark: Boolean, toggleDark: () -> Un
                     Spacer(Modifier.height(6.dp))
                     Text("Monitoring gempa bumi, potensi tsunami, riwayat, ShakeMap, notifikasi, dan berbagi gambar informasi.", color = fg.copy(alpha = .75f), fontSize = 13.sp)
                     Spacer(Modifier.height(6.dp))
-                    Text("Sumber gempa: BMKG • Dashboard tsunami: InaTEWS BMKG • Peta realtime: InaTEWS/OpenStreetMap", color = fg.copy(alpha = .6f), fontSize = 11.sp)
+                    Text("Monitoring & katalog: WRS GEMPA Netlify • Sumber data: BMKG / InaTEWS / USGS sesuai kejadian. Peta tsunami resmi ditampilkan terpisah.", color = fg.copy(alpha = .6f), fontSize = 11.sp)
                 }
             }
         }
@@ -885,7 +885,7 @@ private fun TsunamiPage(latest: Quake?, history: List<Quake>, fg: Color, card: C
                     Spacer(Modifier.height(12.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = {
-                            ShareUtils.shareBitmap(context, ShareUtils.tsunamiBitmap("Tsunami Dashboard BMKG", statusText, detail), "wrs_tsunami", "Bagikan info tsunami")
+                            ShareUtils.shareBitmap(context, ShareUtils.tsunamiBitmap("Dashboard Tsunami WRS GEMPA", statusText, detail), "wrs_tsunami", "Bagikan info tsunami", "WRS GEMPA • $statusText\n$detail\n\nPeriksa arahan resmi BMKG/InaTEWS untuk keputusan keselamatan.")
                         }, modifier = Modifier.weight(1f)) {
                             Icon(Icons.Default.Share, null); Spacer(Modifier.width(4.dp)); Text("Bagikan")
                         }
@@ -922,7 +922,7 @@ private fun TsunamiPage(latest: Quake?, history: List<Quake>, fg: Color, card: C
                 Button(onClick = {
                     webView?.let {
                         val b = ShareUtils.captureView(it)
-                        if (b != null) ShareUtils.shareBitmap(context, b, "inatews_tsunami", "Bagikan tangkapan layar InaTEWS")
+                        if (b != null) ShareUtils.shareBitmap(context, b, "wrs_tsunami_map", "Bagikan peta tsunami", "Peta tsunami • WRS GEMPA\nInformasi peta resmi InaTEWS yang dimuat dalam aplikasi.")
                     }
                 }, modifier = Modifier.weight(1f)) { Icon(Icons.Default.Share, null); Spacer(Modifier.width(4.dp)); Text("Bagikan peta") }
                 OutlinedButton(onClick = {
