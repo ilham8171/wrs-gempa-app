@@ -352,7 +352,7 @@ private fun WrsGempaApp() {
 private fun Header(fg: Color, title: String, subtitle: String = "") {
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
         Box(Modifier.size(48.dp).background(Blue, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
-            Icon(Icons.Default.Waves, null, tint = Color.White, modifier = Modifier.size(28.dp))
+            Icon(Icons.Default.CrisisAlert, null, tint = Color.White, modifier = Modifier.size(28.dp))
         }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
@@ -642,7 +642,7 @@ private fun DetailPage(quake: Quake, fg: Color, card: Color, back: () -> Unit, p
                 Text("ShakeMap BMKG", color = fg, fontWeight = FontWeight.Bold, fontSize = 17.sp)
                 Card(colors = CardDefaults.cardColors(containerColor = card), shape = RoundedCornerShape(18.dp)) {
                     Column(Modifier.padding(8.dp)) {
-                        RemoteImage("https://static.bmkg.go.id/" + quake.shakemap)
+                        RemoteImage(if (quake.shakemap.startsWith("http")) quake.shakemap else "https://bmkg-content-inatews.storage.googleapis.com/" + quake.shakemap)
                         Text("Peta guncangan BMKG • " + quake.shakemap, color = fg.copy(alpha = .6f), fontSize = 10.sp, modifier = Modifier.padding(6.dp))
                     }
                 }
@@ -800,7 +800,7 @@ private fun MorePage(fg: Color, card: Color, dark: Boolean, toggleDark: () -> Un
         item {
             Card(colors = CardDefaults.cardColors(containerColor = card), shape = RoundedCornerShape(18.dp)) {
                 Column(Modifier.padding(16.dp)) {
-                    Text("WRS GEMPA 1.3.0", color = fg, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+                    Text("WRS GEMPA 1.4.0", color = fg, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
                     Spacer(Modifier.height(6.dp))
                     Text("Monitoring gempa bumi, potensi tsunami, riwayat, ShakeMap, notifikasi, dan berbagi gambar informasi.", color = fg.copy(alpha = .75f), fontSize = 13.sp)
                     Spacer(Modifier.height(6.dp))
@@ -847,7 +847,7 @@ private fun ShakeMapsPage(items: List<Quake>, fg: Color, card: Color, padding: P
             Card(colors = CardDefaults.cardColors(containerColor = card), shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth().clickable { open(q) }) {
                 Column(Modifier.padding(8.dp)) {
                     Text("M " + q.magnitude + " • " + q.location, color = fg, fontWeight = FontWeight.Bold, modifier = Modifier.padding(8.dp))
-                    RemoteImage("https://static.bmkg.go.id/" + q.shakemap)
+                    RemoteImage(if (q.shakemap.startsWith("http")) q.shakemap else "https://bmkg-content-inatews.storage.googleapis.com/" + q.shakemap)
                 }
             }
         }
