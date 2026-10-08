@@ -5,6 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import android.content.pm.PackageManager
+import android.location.Location
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -67,6 +68,48 @@ class EarthquakeWorker(context: Context, params: WorkerParameters) : CoroutineWo
                     val fingerprint = felt.optString("Tanggal") + "|" + felt.optString("Jam") + "|" +
                         felt.optString("Magnitude") + "|" + felt.optString("Wilayah")
                     candidates.add(Triple("Gempa dirasakan • M " + felt.optString("Magnitude"), "felt|$fingerprint", felt))
+                }
+            }
+
+
+            if (prefs.getBoolean("nearby_alerts", false)) {
+                val userLat = prefs.getString("user_lat", null)?.toDoubleOrNull()
+                val userLon = prefs.getString("user_lon", null)?.toDoubleOrNull()
+                if (userLat != null && userLon != null) {
+                    val radiusKm = prefs.getString("radius", "200 km")?.filter { it.isDigit() }?.toDoubleOrNull() ?: 200.0
+                    val nearbyRoot = fetch("gempaterkini.json")
+                    val value = nearbyRoot.optJSONObject("Infogempa")?.opt("gempa")
+                    val array = when (value) {
+                        is JSONArray -> value
+                        is JSONObject -> JSONArray().put(value)
+                        else -> JSONArray()
+                    }
+                    var nearestMatch: JSONObject? = null
+                    var nearestDistance = Double.MAX_VALUE
+                    for (index in 0 until array.length()) {
+                        val item = array.optJSONObject(index) ?: continue
+                        val latText = item.optString("Lintang", "")
+                        val lonText = item.optString("Bujur", "")
+                        val latValue = latText.replace(" LS", "").replace(" LU", "").replace(",", ".")
+                            .filter { it.isDigit() || it == '.' || it == '-' }.toDoubleOrNull() ?: continue
+                        val lonValue = lonText.replace(" BT", "").replace(" BB", "").replace(",", ".")
+                            .filter { it.isDigit() || it == '.' || it == '-' }.toDoubleOrNull() ?: continue
+                        val lat = if (latText.contains("LS")) -kotlin.math.abs(latValue) else kotlin.math.abs(latValue)
+                        val lon = if (lonText.contains("BB")) -kotlin.math.abs(lonValue) else kotlin.math.abs(lonValue)
+                        val distance = FloatArray(1)
+                        Location.distanceBetween(userLat, userLon, lat, lon, distance)
+                        val km = distance[0] / 1000.0
+                        if (km <= radiusKm && km < nearestDistance) {
+                            nearestMatch = item
+                            nearestDistance = km
+                        }
+                    }
+                    val nearby = nearestMatch
+                    if (nearby != null) {
+                        val fingerprint = nearby.optString("Tanggal") + "|" + nearby.optString("Jam") + "|" +
+                            nearby.optString("Magnitude") + "|" + nearby.optString("Wilayah")
+                        candidates.add(Triple("Gempa dalam radius " + radiusKm.toInt() + " km", "nearby|" + fingerprint, nearby))
+                    }
                 }
             }
 
