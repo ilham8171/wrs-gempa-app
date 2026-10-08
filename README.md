@@ -1,28 +1,19 @@
-# WRS GEMPA
+# WRS GEMPA Android
 
-Aplikasi Android untuk monitoring gempa bumi Indonesia.
+Aplikasi Android native untuk menampilkan informasi gempa terbaru dari BMKG.
 
-## Fitur
+## Fitur versi awal
+- Dashboard Kotlin + Jetpack Compose
+- Mengambil data gempa terbaru dari endpoint publik BMKG saat aplikasi dibuka
+- Informasi magnitudo, lokasi, waktu, kedalaman, dan potensi tsunami
+- Tombol untuk memperbarui data
+- Pilihan tampilan terang/gelap
+- GitHub Actions untuk membangun APK debug
 
-- Dashboard monitoring gempa
-- Data gempa dari BMKG
-- Peta gempa interaktif
-- Daftar gempa terbaru
-- Detail informasi gempa
-- Riwayat gempa
-- Informasi potensi tsunami
-- Lokasi pengguna
-- Notifikasi gempa
-- Dark mode dan light mode
+## Build APK
+Buka repository ini dengan Android Studio, lakukan Gradle Sync, lalu pilih **Build > Build APK(s)**. Workflow GitHub Actions juga disiapkan untuk membangun APK debug; setelah workflow selesai, unduh artifact `wrs-gempa-debug-apk`.
 
-## Teknologi
+## Belum tersedia
+Peta interaktif, riwayat gempa, perhitungan gempa terdekat, dan notifikasi otomatis di latar belakang belum diterapkan. Notifikasi otomatis membutuhkan implementasi layanan latar belakang/backend yang andal. Aplikasi ini bukan pengganti peringatan resmi BMKG atau arahan petugas.
 
-- Kotlin
-- Jetpack Compose
-- Material 3
-- Firebase Cloud Messaging
-- GitHub Actions
-
-## Sumber Data
-
-BMKG — Badan Meteorologi, Klimatologi, dan Geofisika.
+Sumber data: BMKG, endpoint publik informasi gempa terbaru.
