@@ -1,7 +1,10 @@
 package id.wrsgempa.app
 
+import android.Manifest
 import android.annotation.SuppressLint
+import android.content.pm.PackageManager
 import android.os.Bundle
+import android.os.Build
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
@@ -60,6 +63,9 @@ data class Quake(
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 5107)
+        }
         val request = PeriodicWorkRequestBuilder<EarthquakeWorker>(15, TimeUnit.MINUTES).build()
         WorkManager.getInstance(applicationContext).enqueueUniquePeriodicWork(
             "wrs_gempa_alerts", ExistingPeriodicWorkPolicy.KEEP, request
