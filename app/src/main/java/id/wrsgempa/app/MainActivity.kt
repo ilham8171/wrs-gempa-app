@@ -287,7 +287,7 @@ private fun WrsGempaApp() {
             }
             history = (listOfNotNull(latest) + quakes + feltQuakes + tsunamiItems + history).distinctBy(::quakeKey).take(250)
             saveHistory(prefs, history)
-            lastUpdated = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
+            lastUpdated = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale("id", "ID")).apply { timeZone = java.util.TimeZone.getTimeZone("Asia/Jakarta") }.format(java.util.Date())
         } catch (_: Exception) {
             error = "Data WRS GEMPA belum dapat dimuat. Periksa koneksi dan endpoint Netlify."
         } finally {
@@ -343,7 +343,7 @@ private fun WrsGempaApp() {
                     else -> when (tab) {
                         0 -> HomePage(latest, quakes, feltQuakes, loading, error, lastUpdated, fg, card, dark, { dark = !dark }, { refreshAction() }, { selected = it }, { tab = 1 }, { subPage = 6 }, padding)
                         1 -> MapPage(lastUpdated, fg, padding, { subPage = 8 }, { subPage = 9 })
-                        2 -> QuakeListPage(quakes, feltQuakes, filter, { filter = it }, fg, card, padding, { selected = it })
+                        2 -> QuakeListPage(quakes, feltQuakes, history.filter(::isTsunamiPotential), filter, { filter = it }, fg, card, padding, { selected = it })
                         3 -> NotificationPage(latest, quakes, bigAlerts, { bigAlerts = it; prefs.edit().putBoolean("big_alerts", it).apply() }, feltAlerts, { feltAlerts = it; prefs.edit().putBoolean("felt_alerts", it).apply() }, tsunamiAlerts, { tsunamiAlerts = it; prefs.edit().putBoolean("tsunami_alerts", it).apply() }, nearbyAlerts, { nearbyAlerts = it; prefs.edit().putBoolean("nearby_alerts", it).apply() }, minMagnitude, { minMagnitude = it; prefs.edit().putString("min_magnitude", it).apply() }, radius, { radius = it; prefs.edit().putString("radius", it).apply() }, fg, card, padding, { selected = it })
                         else -> MorePage(fg, card, dark, { dark = !dark }, padding, { page -> subPage = page })
                     }
@@ -523,18 +523,18 @@ private fun QuakeRow(quake: Quake, card: Color, fg: Color, open: () -> Unit) {
 }
 
 @Composable
-private fun QuakeListPage(quakes: List<Quake>, felt: List<Quake>, filter: String, setFilter: (String) -> Unit, fg: Color, card: Color, padding: PaddingValues, open: (Quake) -> Unit) {
+private fun QuakeListPage(quakes: List<Quake>, felt: List<Quake>, tsunami: List<Quake>, filter: String, setFilter: (String) -> Unit, fg: Color, card: Color, padding: PaddingValues, open: (Quake) -> Unit) {
     Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 18.dp)) {
-        Header(fg, "Daftar Gempa", "M 5+, dirasakan, dan detail kejadian")
+        Header(fg, "Informasi Gempa", "Data BMKG • semua waktu WIB")
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            listOf("Terbaru", "M ≥ 5.0", "Dirasakan").forEach { item ->
+            listOf("Realtime", "Dirasakan", "M ≥ 5.0", "Tsunami").forEach { item ->
                 FilterChip(selected = filter == item, onClick = { setFilter(item) }, label = { Text(item, fontSize = 11.sp) })
             }
         }
         Spacer(Modifier.height(8.dp))
-        val source = if (filter == "Dirasakan") felt else quakes
-        val shown = if (filter == "M ≥ 5.0") source.filter { it.magnitudeValue >= 5.0 } else source
+        val source = when (filter) { "Dirasakan" -> felt; "Tsunami" -> tsunami; else -> quakes }
+        val shown = if (filter == "M ≥ 5.0") quakes.filter { it.magnitudeValue >= 5.0 } else source
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
             if (shown.isEmpty()) item { Text("Belum ada data. Tarik layar dari atas atau tunggu update otomatis.", color = Muted, modifier = Modifier.padding(20.dp)) }
             items(shown) { QuakeRow(it, card, fg) { open(it) } }
