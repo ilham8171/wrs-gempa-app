@@ -4,12 +4,16 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
+import android.location.Location
+import android.location.LocationManager
 import android.os.Bundle
 import android.os.Build
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -25,6 +29,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -92,11 +97,15 @@ private suspend fun fetchJson(path: String): JSONObject = withContext(Dispatcher
 private fun parseQuake(obj: JSONObject): Quake {
     val coord = obj.optString("Coordinates", "")
     val parts = coord.split(",")
-    val lat = obj.optString("Lintang").replace(" LS", "").replace(" LU", "").replace(",", ".")
+    val latRaw = obj.optString("Lintang")
+    val latValue = latRaw.replace(" LS", "").replace(" LU", "").replace(",", ".")
         .filter { it.isDigit() || it == '.' || it == '-' }.toDoubleOrNull()
+    val lat = latValue?.let { if (latRaw.contains("LS")) -kotlin.math.abs(it) else kotlin.math.abs(it) }
         ?: parts.getOrNull(0)?.toDoubleOrNull() ?: -2.5
-    val lon = obj.optString("Bujur").replace(" BT", "").replace(" BB", "").replace(",", ".")
+    val lonRaw = obj.optString("Bujur")
+    val lonValue = lonRaw.replace(" BT", "").replace(" BB", "").replace(",", ".")
         .filter { it.isDigit() || it == '.' || it == '-' }.toDoubleOrNull()
+    val lon = lonValue?.let { if (lonRaw.contains("BB")) -kotlin.math.abs(it) else kotlin.math.abs(it) }
         ?: parts.getOrNull(1)?.toDoubleOrNull() ?: 118.0
     return Quake(
         date = obj.optString("Tanggal", "Tanggal tidak tersedia"),
@@ -185,11 +194,14 @@ private fun WrsGempaApp() {
                 DetailPage(selected!!, fg, card, { selected = null }, padding)
             } else {
                 when (tab) {
-                    0 -> HomePage(latest, quakes, loading, error, fg, card, dark, { dark = !dark }, { scope.launch { refresh() } }, { selected = it }, padding)
+                    0 -> HomePage(latest, quakes, feltQuakes, loading, error, fg, card, dark, { dark = !dark }, { scope.launch { refresh() } }, { selected = it }, padding)
                     1 -> MapPage(quakes.ifEmpty { listOfNotNull(latest) }, fg, padding, { selected = it })
                     2 -> QuakeListPage(quakes, feltQuakes, filter, { filter = it }, fg, card, padding, { selected = it })
                     3 -> NotificationPage(latest, quakes, bigAlerts, { bigAlerts = it; prefs.edit().putBoolean("big_alerts", it).apply() }, feltAlerts, { feltAlerts = it; prefs.edit().putBoolean("felt_alerts", it).apply() }, tsunamiAlerts, { tsunamiAlerts = it; prefs.edit().putBoolean("tsunami_alerts", it).apply() }, nearbyAlerts, { nearbyAlerts = it; prefs.edit().putBoolean("nearby_alerts", it).apply() }, minMagnitude, { minMagnitude = it; prefs.edit().putString("min_magnitude", it).apply() }, radius, { radius = it; prefs.edit().putString("radius", it).apply() }, fg, card, padding, { selected = it })
-                    else -> MorePage(fg, card, dark, { dark = !dark }, padding, { tab = it })
+                    4 -> MorePage(fg, card, dark, { dark = !dark }, padding, { tab = it })
+                    5 -> NearbyPage(quakes, fg, card, padding, { selected = it })
+                    6 -> TsunamiPage(latest, fg, card, padding)
+                    else -> InfoPage(fg, card, padding)
                 }
             }
         }
@@ -211,7 +223,7 @@ private fun Header(fg: Color, title: String, subtitle: String = "") {
 }
 
 @Composable
-private fun HomePage(latest: Quake?, quakes: List<Quake>, loading: Boolean, error: String, fg: Color, card: Color, dark: Boolean, toggleDark: () -> Unit, refresh: () -> Unit, open: (Quake) -> Unit, padding: PaddingValues) {
+private fun HomePage(latest: Quake?, quakes: List<Quake>, feltQuakes: List<Quake>, loading: Boolean, error: String, fg: Color, card: Color, dark: Boolean, toggleDark: () -> Unit, refresh: () -> Unit, open: (Quake) -> Unit, padding: PaddingValues) {
     LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -252,7 +264,7 @@ private fun HomePage(latest: Quake?, quakes: List<Quake>, loading: Boolean, erro
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 StatCard("Hari ini", quakes.size.toString(), "Data terkini", card, fg, Modifier.weight(1f))
                 StatCard("M ≥ 5.0", quakes.count { it.magnitudeValue >= 5.0 }.toString(), "Gempa besar", card, fg, Modifier.weight(1f))
-                StatCard("Dirasakan", feltQuakeCount(quakes).toString(), "Daftar BMKG", card, fg, Modifier.weight(1f))
+                StatCard("Dirasakan", feltQuakes.size.toString(), "Daftar BMKG", card, fg, Modifier.weight(1f))
             }
         }
         item {
@@ -297,8 +309,6 @@ private fun HomePage(latest: Quake?, quakes: List<Quake>, loading: Boolean, erro
         item { Text("Sumber data: BMKG. Data dapat berubah sewaktu-waktu. Bukan pengganti peringatan resmi dan arahan petugas.", color = fg.copy(alpha = .65f), fontSize = 11.sp) }
     }
 }
-
-private fun feltQuakeCount(quakes: List<Quake>) = quakes.count { it.felt.isNotBlank() }
 
 @Composable
 private fun StatCard(title: String, value: String, subtitle: String, card: Color, fg: Color, modifier: Modifier = Modifier) {
@@ -513,6 +523,9 @@ private fun MorePage(fg: Color, card: Color, dark: Boolean, toggleDark: () -> Un
                     SettingsRow(Icons.Default.Notifications, "Notifikasi & alert", "Kelola jenis peringatan", fg) { navigate(3) }
                     SettingsRow(Icons.Default.Map, "Peta gempa", "Lihat titik gempa terbaru", fg) { navigate(1) }
                     SettingsRow(Icons.Default.History, "Daftar gempa", "Data terbaru BMKG", fg) { navigate(2) }
+                    SettingsRow(Icons.Default.LocationOn, "Sekitar saya", "Gempa terdekat dari lokasi", fg) { navigate(5) }
+                    SettingsRow(Icons.Default.Warning, "Potensi tsunami", "Informasi dari BMKG", fg) { navigate(6) }
+                    SettingsRow(Icons.Default.Info, "Informasi", "Tentang aplikasi dan sumber data", fg) { navigate(7) }
                 }
             }
         }
@@ -548,5 +561,113 @@ private fun SettingsRow(icon: androidx.compose.ui.graphics.vector.ImageVector, l
         Text(label, color = fg, modifier = Modifier.weight(1f), fontSize = 13.sp)
         Text(value, color = fg.copy(alpha = .6f), fontSize = 11.sp)
         Icon(Icons.Default.ChevronRight, contentDescription = null, tint = fg.copy(alpha = .5f))
+    }
+}
+
+
+@Composable
+private fun NearbyPage(quakes: List<Quake>, fg: Color, card: Color, padding: PaddingValues, open: (Quake) -> Unit) {
+    val context = LocalContext.current
+    var userLocation by remember { mutableStateOf<Location?>(null) }
+    var locationMessage by remember { mutableStateOf("Izinkan akses lokasi untuk menghitung jarak gempa.") }
+    fun readLocation() {
+        val fine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val coarse = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        if (!fine && !coarse) {
+            locationMessage = "Izin lokasi belum diberikan."
+            return
+        }
+        try {
+            val manager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+            val providers = listOf(LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER)
+            userLocation = providers.mapNotNull { provider ->
+                try { manager.getLastKnownLocation(provider) } catch (_: Exception) { null }
+            }.maxByOrNull { it.time }
+            locationMessage = if (userLocation == null) "Lokasi belum tersedia. Aktifkan Lokasi/GPS lalu coba lagi." else
+                "Lokasi ditemukan: %.4f, %.4f".format(userLocation!!.latitude, userLocation!!.longitude)
+        } catch (_: Exception) {
+            locationMessage = "Tidak bisa membaca lokasi. Pastikan layanan lokasi aktif."
+        }
+    }
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
+        if (results.values.any { it }) readLocation() else locationMessage = "Izin lokasi ditolak. Kamu masih bisa melihat daftar gempa di tab Gempa."
+    }
+    LaunchedEffect(Unit) { readLocation() }
+    val sorted = if (userLocation == null) emptyList() else quakes.map { quake ->
+        val distance = FloatArray(1)
+        Location.distanceBetween(userLocation!!.latitude, userLocation!!.longitude, quake.latitude, quake.longitude, distance)
+        quake to distance[0] / 1000.0
+    }.sortedBy { it.second }
+    LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item { Header(fg, "Sekitar Saya", "Pantau gempa berdasarkan lokasi perangkat") }
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = card), shape = RoundedCornerShape(18.dp)) {
+                Column(Modifier.padding(16.dp)) {
+                    Icon(Icons.Default.LocationOn, contentDescription = null, tint = Blue, modifier = Modifier.size(30.dp))
+                    Spacer(Modifier.height(6.dp))
+                    Text(locationMessage, color = fg, fontSize = 13.sp)
+                    Spacer(Modifier.height(10.dp))
+                    Button(onClick = {
+                        permissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+                    }, modifier = Modifier.fillMaxWidth()) { Text("Izinkan / perbarui lokasi") }
+                }
+            }
+        }
+        if (userLocation != null) {
+            item { Text("Gempa terdekat", color = fg, fontSize = 17.sp, fontWeight = FontWeight.Bold) }
+            items(sorted.take(15)) { (quake, distance) ->
+                Card(colors = CardDefaults.cardColors(containerColor = card), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth().clickable { open(quake) }) {
+                    Row(Modifier.padding(13.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("M ${quake.magnitude} • ${quake.location}", color = fg, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Text("${quake.depth} • ${quake.date} ${quake.time}", color = fg.copy(alpha = .65f), fontSize = 11.sp)
+                        }
+                        Text(if (distance < 1) "<1 km" else "%.0f km".format(distance), color = Blue, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TsunamiPage(latest: Quake?, fg: Color, card: Color, padding: PaddingValues) {
+    LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        item { Header(fg, "Potensi Tsunami", "Informasi dari data BMKG") }
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = card), shape = RoundedCornerShape(20.dp)) {
+                Column(Modifier.padding(18.dp)) {
+                    Icon(Icons.Default.Waves, contentDescription = null, tint = Blue, modifier = Modifier.size(38.dp))
+                    Spacer(Modifier.height(8.dp))
+                    Text("Informasi gempa terbaru", color = fg, fontWeight = FontWeight.Bold)
+                    Text(latest?.location ?: "Data BMKG belum tersedia", color = fg.copy(alpha = .7f), fontSize = 13.sp)
+                    HorizontalDivider(Modifier.padding(vertical = 12.dp))
+                    Text(latest?.tsunami ?: "Belum ada informasi potensi tsunami.", color = fg, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(8.dp))
+                    Text("Periksa pengumuman resmi BMKG untuk status terkini. Jangan mengandalkan aplikasi ini sebagai satu-satunya sumber peringatan.", color = fg.copy(alpha = .7f), fontSize = 12.sp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun InfoPage(fg: Color, card: Color, padding: PaddingValues) {
+    LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item { Header(fg, "Informasi", "Tentang WRS GEMPA") }
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = card), shape = RoundedCornerShape(18.dp)) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("WRS GEMPA", color = fg, fontSize = 19.sp, fontWeight = FontWeight.ExtraBold)
+                    Spacer(Modifier.height(8.dp))
+                    Text("Aplikasi pemantauan informasi gempa bumi Indonesia yang mengambil data dari BMKG.", color = fg.copy(alpha = .75f), fontSize = 13.sp)
+                    Spacer(Modifier.height(10.dp))
+                    DetailLine("Sumber gempa", "BMKG — data.bmkg.go.id", fg)
+                    DetailLine("Peta", "OpenStreetMap", fg)
+                    DetailLine("Versi", "1.1.0", fg)
+                    DetailLine("Peringatan", "Bukan pengganti informasi resmi atau arahan petugas.", fg)
+                }
+            }
+        }
     }
 }
