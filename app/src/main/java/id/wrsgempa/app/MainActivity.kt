@@ -264,7 +264,8 @@ private fun WrsGempaApp() {
     val fg = if (dark) Color.White else Navy
     val card = if (dark) Color(0xFF13233A) else Color.White
 
-    val refreshAction: () -> Unit = { kotlinx.coroutines.MainScope().launch { refresh() } }
+    val scope = rememberCoroutineScope()
+    val refreshAction: () -> Unit = { scope.launch { refresh() } }
     val pullState = rememberPullRefreshState(loading, refreshAction)
 
     MaterialTheme(
