@@ -99,19 +99,36 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private suspend fun fetchJson(path: String): JSONObject = withContext(Dispatchers.IO) {
-    val connection = URL("https://data.bmkg.go.id/DataMKG/TEWS/" + path).openConnection() as HttpURLConnection
-    connection.connectTimeout = 12000
-    connection.readTimeout = 12000
+private suspend fun fetchWrsData(): JSONObject = withContext(Dispatchers.IO) {
+    val url = URL("https://wrsgempa.netlify.app/.netlify/functions/earthquakes?t=" + System.currentTimeMillis())
+    val connection = url.openConnection() as HttpURLConnection
+    connection.connectTimeout = 15000
+    connection.readTimeout = 20000
     connection.setRequestProperty("User-Agent", "WRS-GEMPA-Android")
+    connection.setRequestProperty("Accept", "application/json")
+    connection.setRequestProperty("Cache-Control", "no-cache")
     try {
         if (connection.responseCode !in 200..299) error("HTTP " + connection.responseCode)
         JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
-    } finally {
-        connection.disconnect()
-    }
+    } finally { connection.disconnect() }
 }
 
+private fun parseWrsQuake(obj: JSONObject): Quake? {
+    val lat = obj.optDouble("lat", Double.NaN)
+    val lon = obj.optDouble("lon", Double.NaN)
+    val magnitude = obj.optDouble("magnitude", Double.NaN)
+    if (!magnitude.isFinite()) return null
+    val rawTime = obj.optString("time", "")
+    val dateObj = try { java.util.Date.from(java.time.Instant.parse(rawTime)) } catch (_: Exception) {
+        try { java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).parse(rawTime.replace("T", " ").take(19)) } catch (_: Exception) { java.util.Date() }
+    }
+    val dateFmt = java.text.SimpleDateFormat("dd MMM yyyy", java.util.Locale("id", "ID")).apply { timeZone = java.util.TimeZone.getTimeZone("Asia/Jakarta") }
+    val timeFmt = java.text.SimpleDateFormat("HH:mm:ss 'WIB'", java.util.Locale("id", "ID")).apply { timeZone = java.util.TimeZone.getTimeZone("Asia/Jakarta") }
+    val latText = if (lat.isFinite()) String.format(java.util.Locale.US, "%.3f", lat) else "—"
+    val lonText = if (lon.isFinite()) String.format(java.util.Locale.US, "%.3f", lon) else "—"
+    val rawDepth = obj.optString("depth", "—")
+    return Quake(dateFmt.format(dateObj), timeFmt.format(dateObj), String.format(java.util.Locale.US, "%.1f", magnitude), rawDepth + if (rawDepth.isNotBlank() && rawDepth != "—" && !rawDepth.contains("km", true)) " km" else "", obj.optString("place", "Indonesia"), if (lat.isFinite() && lon.isFinite()) "$latText, $lonText" else "Koordinat tidak tersedia", if (lat.isFinite()) lat else -2.5, if (lon.isFinite()) lon else 118.0, obj.optString("potential", "—"), obj.optString("felt", ""), obj.optString("shakemap", ""), obj.optString("key", rawTime + "|" + magnitude + "|" + lat + "|" + lon))
+}
 private fun parseCoordinate(raw: String, isLatitude: Boolean): Double? {
     val cleaned = raw.replace(" LS", "").replace(" LU", "").replace(" BT", "").replace(" BB", "").replace(",", ".")
         .filter { it.isDigit() || it == '.' || it == '-' }
