@@ -2,6 +2,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("com.google.gms.google-services")
 }
 android {
     namespace = "id.wrsgempa.app"
@@ -10,8 +11,8 @@ android {
         applicationId = "id.wrsgempa.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "1.4.0"
+        versionCode = 6
+        versionName = "1.5.0"
     }
     buildFeatures { compose = true }
     compileOptions {
@@ -21,6 +22,8 @@ android {
     kotlinOptions { jvmTarget = "17" }
 }
 dependencies {
+    implementation(platform("com.google.firebase:firebase-bom:35.0.0"))
+    implementation("com.google.firebase:firebase-messaging")
     implementation(platform("androidx.compose:compose-bom:2024.12.01"))
     implementation("androidx.activity:activity-compose:1.10.0")
     implementation("androidx.compose.ui:ui")
