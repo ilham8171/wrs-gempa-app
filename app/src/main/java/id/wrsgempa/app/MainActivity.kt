@@ -2,6 +2,7 @@ package id.wrsgempa.app
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Build
@@ -23,6 +24,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -121,6 +123,8 @@ private fun quakeArray(root: JSONObject): List<Quake> {
 
 @Composable
 private fun WrsGempaApp() {
+    val appContext = LocalContext.current.applicationContext
+    val prefs = remember { appContext.getSharedPreferences("wrs_alerts", Context.MODE_PRIVATE) }
     var dark by remember { mutableStateOf(false) }
     var tab by remember { mutableIntStateOf(0) }
     var latest by remember { mutableStateOf<Quake?>(null) }
@@ -130,12 +134,12 @@ private fun WrsGempaApp() {
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     var filter by remember { mutableStateOf("Terbaru") }
-    var bigAlerts by remember { mutableStateOf(true) }
-    var feltAlerts by remember { mutableStateOf(true) }
-    var tsunamiAlerts by remember { mutableStateOf(true) }
-    var nearbyAlerts by remember { mutableStateOf(true) }
-    var minMagnitude by remember { mutableStateOf("4.0") }
-    var radius by remember { mutableStateOf("200 km") }
+    var bigAlerts by remember { mutableStateOf(prefs.getBoolean("big_alerts", true)) }
+    var feltAlerts by remember { mutableStateOf(prefs.getBoolean("felt_alerts", true)) }
+    var tsunamiAlerts by remember { mutableStateOf(prefs.getBoolean("tsunami_alerts", true)) }
+    var nearbyAlerts by remember { mutableStateOf(prefs.getBoolean("nearby_alerts", false)) }
+    var minMagnitude by remember { mutableStateOf(prefs.getString("min_magnitude", "4.0") ?: "4.0") }
+    var radius by remember { mutableStateOf(prefs.getString("radius", "200 km") ?: "200 km") }
     val scope = rememberCoroutineScope()
 
     suspend fun refresh() {
@@ -184,7 +188,7 @@ private fun WrsGempaApp() {
                     0 -> HomePage(latest, quakes, loading, error, fg, card, dark, { dark = !dark }, { scope.launch { refresh() } }, { selected = it }, padding)
                     1 -> MapPage(quakes.ifEmpty { listOfNotNull(latest) }, fg, padding, { selected = it })
                     2 -> QuakeListPage(quakes, feltQuakes, filter, { filter = it }, fg, card, padding, { selected = it })
-                    3 -> NotificationPage(latest, quakes, bigAlerts, { bigAlerts = it }, feltAlerts, { feltAlerts = it }, tsunamiAlerts, { tsunamiAlerts = it }, nearbyAlerts, { nearbyAlerts = it }, minMagnitude, { minMagnitude = it }, radius, { radius = it }, fg, card, padding, { selected = it })
+                    3 -> NotificationPage(latest, quakes, bigAlerts, { bigAlerts = it; prefs.edit().putBoolean("big_alerts", it).apply() }, feltAlerts, { feltAlerts = it; prefs.edit().putBoolean("felt_alerts", it).apply() }, tsunamiAlerts, { tsunamiAlerts = it; prefs.edit().putBoolean("tsunami_alerts", it).apply() }, nearbyAlerts, { nearbyAlerts = it; prefs.edit().putBoolean("nearby_alerts", it).apply() }, minMagnitude, { minMagnitude = it; prefs.edit().putString("min_magnitude", it).apply() }, radius, { radius = it; prefs.edit().putString("radius", it).apply() }, fg, card, padding, { selected = it })
                     else -> MorePage(fg, card, dark, { dark = !dark }, padding, { tab = it })
                 }
             }
