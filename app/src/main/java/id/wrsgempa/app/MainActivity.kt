@@ -39,6 +39,7 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -142,6 +143,7 @@ private fun WrsGempaApp() {
     var selected by remember { mutableStateOf<Quake?>(null) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
+    var lastUpdated by remember { mutableStateOf("Belum diperbarui") }
     var filter by remember { mutableStateOf("Terbaru") }
     var bigAlerts by remember { mutableStateOf(prefs.getBoolean("big_alerts", true)) }
     var feltAlerts by remember { mutableStateOf(prefs.getBoolean("felt_alerts", true)) }
@@ -160,6 +162,7 @@ private fun WrsGempaApp() {
             quakes = quakeArray(fetchJson("gempaterkini.json"))
             feltQuakes = quakeArray(fetchJson("gempadirasakan.json"))
             if (quakes.isEmpty() && latest != null) quakes = listOfNotNull(latest)
+            lastUpdated = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
         } catch (_: Exception) {
             error = "Data BMKG belum dapat dimuat. Periksa koneksi internet lalu coba perbarui."
             if (quakes.isEmpty()) quakes = listOfNotNull(latest)
@@ -167,7 +170,12 @@ private fun WrsGempaApp() {
             loading = false
         }
     }
-    LaunchedEffect(Unit) { refresh() }
+    LaunchedEffect(Unit) {
+        while (true) {
+            refresh()
+            delay(60_000L)
+        }
+    }
 
     val bg = if (dark) Color(0xFF07111F) else Pale
     val fg = if (dark) Color.White else Navy
@@ -195,7 +203,7 @@ private fun WrsGempaApp() {
             } else {
                 when (tab) {
                     0 -> HomePage(latest, quakes, feltQuakes, loading, error, fg, card, dark, { dark = !dark }, { scope.launch { refresh() } }, { selected = it }, padding)
-                    1 -> MapPage(quakes.ifEmpty { listOfNotNull(latest) }, fg, padding, { selected = it })
+                    1 -> MapPage(quakes.ifEmpty { listOfNotNull(latest) }, lastUpdated, loading, fg, padding, { selected = it })
                     2 -> QuakeListPage(quakes, feltQuakes, filter, { filter = it }, fg, card, padding, { selected = it })
                     3 -> NotificationPage(latest, quakes, bigAlerts, { bigAlerts = it; prefs.edit().putBoolean("big_alerts", it).apply() }, feltAlerts, { feltAlerts = it; prefs.edit().putBoolean("felt_alerts", it).apply() }, tsunamiAlerts, { tsunamiAlerts = it; prefs.edit().putBoolean("tsunami_alerts", it).apply() }, nearbyAlerts, { nearbyAlerts = it; prefs.edit().putBoolean("nearby_alerts", it).apply() }, minMagnitude, { minMagnitude = it; prefs.edit().putString("min_magnitude", it).apply() }, radius, { radius = it; prefs.edit().putString("radius", it).apply() }, fg, card, padding, { selected = it })
                     4 -> MorePage(fg, card, dark, { dark = !dark }, padding, { tab = it })
@@ -368,31 +376,49 @@ private fun QuakeListPage(quakes: List<Quake>, felt: List<Quake>, filter: String
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-private fun MapPage(quakes: List<Quake>, fg: Color, padding: PaddingValues, open: (Quake) -> Unit) {
+private fun MapPage(quakes: List<Quake>, lastUpdated: String, loading: Boolean, fg: Color, padding: PaddingValues, open: (Quake) -> Unit) {
     Column(Modifier.fillMaxSize().padding(padding)) {
-        Column(Modifier.padding(horizontal = 18.dp)) {
-            Header(fg, "Peta Gempa", "Lokasi gempa terbaru")
-            Spacer(Modifier.height(10.dp))
-            Text("Peta menggunakan OpenStreetMap. Koneksi internet diperlukan.", color = fg.copy(alpha = .65f), fontSize = 11.sp)
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+            Header(fg, "Monitoring Gempa Realtime", "Sebaran aktivitas gempa Indonesia")
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Surface(color = Color(0xFFDDF7EA), shape = RoundedCornerShape(20.dp)) {
+                    Text("● LIVE BMKG", color = Color(0xFF11774A), fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp))
+                }
+                Text(if (loading) "Memperbarui…" else "Update $lastUpdated WIB", color = fg.copy(alpha = .7f), fontSize = 11.sp)
+                Spacer(Modifier.weight(1f))
+                Text("$${quakes.size} titik", color = fg, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
         }
-        Spacer(Modifier.height(10.dp))
         AndroidView(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.weight(1f).fillMaxWidth(),
             factory = { context ->
                 WebView(context).apply {
                     webViewClient = WebViewClient()
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
+                    settings.loadWithOverviewMode = true
+                    settings.useWideViewPort = true
                 }
             },
             update = { web ->
-                val markers = quakes.take(40).joinToString("\n") {
-                    "L.marker([${it.latitude}, ${it.longitude}]).addTo(map).bindPopup('<b>M ${it.magnitude}</b><br>${it.location.replace("'", "")}<br>${it.depth}');"
+                val markers = quakes.take(100).joinToString("\n") { quake ->
+                    val magnitude = quake.magnitudeValue
+                    val color = when { magnitude >= 5.0 -> "#ef4444"; magnitude >= 4.0 -> "#f59e0b"; else -> "#22c55e" }
+                    val radius = when { magnitude >= 5.0 -> 11; magnitude >= 4.0 -> 8; else -> 6 }
+                    val location = JSONObject.quote(quake.location.replace("\n", " "))
+                    val mag = JSONObject.quote(quake.magnitude)
+                    val depth = JSONObject.quote(quake.depth)
+                    "L.circleMarker([${quake.latitude},${quake.longitude}],{radius:$radius,color:'$color',fillColor:'$color',fillOpacity:0.82,weight:2}).addTo(map).bindPopup('<b>M '+$mag+'</b><br>'+$location+'<br>'+$depth);"
                 }
-                val html = """<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"><style>html,body,#map{height:100%;margin:0;background:#0a1730}</style><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script></head><body><div id="map"></div><script>var map=L.map('map').setView([-2.5,118],4);L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18,attribution:'© OpenStreetMap'}).addTo(map);$markers</script></body></html>"""
+                val html = """<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"><style>html,body,#map{height:100%;width:100%;margin:0;background:#0a1730}.leaflet-popup-content-wrapper{border-radius:12px}.leaflet-control-attribution{font-size:9px}</style><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script></head><body><div id="map"></div><script>var map=L.map('map',{zoomControl:true}).setView([-2.5,118],4);L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18,attribution:'© OpenStreetMap'}).addTo(map);$markers;var legend=L.control({position:'bottomleft'});legend.onAdd=function(){var d=L.DomUtil.create('div');d.style='background:white;padding:8px 10px;border-radius:10px;font:12px sans-serif;line-height:1.8;box-shadow:0 1px 5px #5555';d.innerHTML='<b>Magnitudo</b><br><span style="color:#22c55e">●</span> &lt; 4.0<br><span style="color:#f59e0b">●</span> 4.0–4.9<br><span style="color:#ef4444">●</span> ≥ 5.0';return d};legend.addTo(map);</script></body></html>"""
                 web.loadDataWithBaseURL("https://www.openstreetmap.org", html, "text/html", "UTF-8", null)
             }
         )
+        Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("🟢 M < 4.0   🟠 M 4.0–4.9   🔴 M ≥ 5.0", color = fg.copy(alpha = .75f), fontSize = 11.sp, modifier = Modifier.weight(1f))
+            Text("BMKG • OSM", color = fg.copy(alpha = .55f), fontSize = 10.sp)
+        }
     }
 }
 
@@ -459,7 +485,7 @@ private fun NotificationPage(latest: Quake?, quakes: List<Quake>, big: Boolean, 
                 Column(Modifier.padding(16.dp)) {
                     Text("Jenis notifikasi", color = fg, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(8.dp))
-                    ToggleRow("Gempa besar (M ≥ 5.0)", big, setBig, fg)
+                    ToggleRow("Gempa sesuai ambang magnitudo", big, setBig, fg)
                     ToggleRow("Gempa dirasakan", felt, setFelt, fg)
                     ToggleRow("Potensi tsunami", tsunami, setTsunami, fg)
                     ToggleRow("Gempa dekat saya", nearby, setNearby, fg)
@@ -471,12 +497,25 @@ private fun NotificationPage(latest: Quake?, quakes: List<Quake>, big: Boolean, 
                 Column(Modifier.padding(16.dp)) {
                     Text("Pengaturan tambahan", color = fg, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(8.dp))
-                    Text("Batas magnitudo untuk tampilan", color = fg.copy(alpha = .7f), fontSize = 12.sp)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("3.0", "4.0", "5.0", "6.0").forEach { v ->
-                            FilterChip(selected = minMagnitude == v, onClick = { setMinMagnitude(v) }, label = { Text("M $v") })
+                    Text("Magnitudo minimum untuk notifikasi gempa", color = fg.copy(alpha = .7f), fontSize = 12.sp)
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        listOf(listOf("1.0", "1.5", "2.0", "2.5"), listOf("3.0", "4.0", "5.0")).forEach { rowValues ->
+                            Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                                rowValues.forEach { v ->
+                                    FilterChip(selected = minMagnitude == v, onClick = { setMinMagnitude(v) }, label = { Text("M $v", fontSize = 11.sp) })
+                                }
+                            }
                         }
                     }
+                    OutlinedTextField(
+                        value = minMagnitude,
+                        onValueChange = { raw -> setMinMagnitude(raw.filter { it.isDigit() || it == '.' }.take(4)) },
+                        label = { Text("Atur sendiri (1.0–9.9)") },
+                        supportingText = { Text("Notifikasi gempa aktif jika magnitudo ≥ nilai ini.") },
+                        singleLine = true,
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal),
+                        modifier = Modifier.fillMaxWidth()
+                    )
                     Spacer(Modifier.height(10.dp))
                     Text("Radius pemantauan", color = fg.copy(alpha = .7f), fontSize = 12.sp)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
