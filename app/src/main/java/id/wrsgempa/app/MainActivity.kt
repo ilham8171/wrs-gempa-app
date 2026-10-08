@@ -255,16 +255,35 @@ private fun WrsGempaApp() {
         loading = true
         error = ""
         try {
-            val latestObj = fetchJson("autogempa.json").optJSONObject("Infogempa")?.optJSONObject("gempa")
-            latest = latestObj?.let(::parseQuake)
-            quakes = quakeArray(fetchJson("gempaterkini.json"))
-            feltQuakes = quakeArray(fetchJson("gempadirasakan.json"))
-            val incoming = listOfNotNull(latest) + feltQuakes + quakes
-            history = (incoming + history).distinctBy(::quakeKey).take(250)
+            val wrs = fetchWrsData()
+            val recentJson = wrs.optJSONArray("recent") ?: JSONArray()
+            val parsedRecent = (0 until recentJson.length()).mapNotNull { i -> recentJson.optJSONObject(i)?.let(::parseWrsQuake) }
+            val preferredLatest = (wrs.optJSONObject("official") ?: wrs.optJSONObject("latest"))?.let(::parseWrsQuake)
+            latest = preferredLatest ?: parsedRecent.firstOrNull()
+            quakes = parsedRecent.distinctBy(::quakeKey)
+            feltQuakes = parsedRecent.filter { it.felt.isNotBlank() }
+            val tsunamiJson = wrs.optJSONArray("tsunamiHistory") ?: JSONArray()
+            val tsunamiItems = (0 until tsunamiJson.length()).mapNotNull { i ->
+                val item = tsunamiJson.optJSONObject(i) ?: return@mapNotNull null
+                val normalized = JSONObject().apply {
+                    put("key", item.optString("key", item.optString("eventid", "tsunami-" + i))
+                    put("magnitude", item.optDouble("magnitude", 0.0))
+                    put("lat", item.optDouble("lat", Double.NaN))
+                    put("lon", item.optDouble("lon", Double.NaN))
+                    put("place", item.optString("place", "Wilayah peringatan tsunami"))
+                    put("depth", item.optString("depth", "—"))
+                    put("time", item.optString("time", item.optString("timesent", "")))
+                    put("potential", item.optString("headline", item.optString("subject", item.optString("potential", "Peringatan tsunami InaTEWS"))))
+                    put("felt", item.optString("description", item.optString("instruction", "")))
+                    put("shakemap", item.optString("shakemap", ""))
+                }
+                parseWrsQuake(normalized)
+            }
+            history = (listOfNotNull(latest) + quakes + feltQuakes + tsunamiItems + history).distinctBy(::quakeKey).take(250)
             saveHistory(prefs, history)
             lastUpdated = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
         } catch (_: Exception) {
-            error = "Data BMKG belum dapat dimuat. Coba lagi saat koneksi tersedia."
+            error = "Data WRS GEMPA belum dapat dimuat. Periksa koneksi dan endpoint Netlify."
         } finally {
             loading = false
         }
