@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "607044517276",
+    "project_id": "wrs-gempa",
+    "storage_bucket": "wrs-gempa.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:607044517276:android:7676330e004e629d8e9c59",
+        "android_client_info": {
+          "package_name": "id.wrsgempa.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB5E4nFvXublkdZ3dmsTS-J6x--hBnasEg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
