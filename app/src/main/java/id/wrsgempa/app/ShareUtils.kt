@@ -1,6 +1,7 @@
 package id.wrsgempa.app
 
 import android.content.ContentValues
+import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
@@ -137,7 +138,7 @@ object ShareUtils {
         return bitmap
     }
 
-    fun shareBitmap(context: Context, bitmap: Bitmap, fileName: String, chooserTitle: String): Boolean {
+    fun shareBitmap(context: Context, bitmap: Bitmap, fileName: String, chooserTitle: String, shareText: String = ""): Boolean {
         return try {
             val dir = File(context.cacheDir, "shared_images").apply { mkdirs() }
             val file = File(dir, fileName + ".png")
@@ -146,6 +147,8 @@ object ShareUtils {
             val intent = Intent(Intent.ACTION_SEND).apply {
                 type = "image/png"
                 putExtra(Intent.EXTRA_STREAM, uri)
+                if (shareText.isNotBlank()) putExtra(Intent.EXTRA_TEXT, shareText)
+                clipData = ClipData.newUri(context.contentResolver, "WRS GEMPA", uri)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
             context.startActivity(Intent.createChooser(intent, chooserTitle))
