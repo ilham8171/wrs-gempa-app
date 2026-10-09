@@ -1239,11 +1239,11 @@ private fun MorePage(fg: Color, card: Color, dark: Boolean, toggleDark: () -> Un
         item {
             Card(colors = CardDefaults.cardColors(containerColor = card), shape = RoundedCornerShape(18.dp)) {
                 Column(Modifier.padding(16.dp)) {
-                    Text("WRS GEMPA 1.6.0", color = fg, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+                    Text("WRS GEMPA 1.7.0", color = fg, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
                     Spacer(Modifier.height(6.dp))
                     Text("Monitoring gempa bumi, potensi tsunami, riwayat, ShakeMap, notifikasi, dan berbagi gambar informasi.", color = fg.copy(alpha = .75f), fontSize = 13.sp)
                     Spacer(Modifier.height(6.dp))
-                    Text("Monitoring & katalog: WRS GEMPA Netlify • Sumber data: BMKG / InaTEWS / USGS sesuai kejadian. Peta tsunami resmi ditampilkan terpisah.", color = fg.copy(alpha = .6f), fontSize = 11.sp)
+                    Text("Gempa: layanan WRS GEMPA dan feed terbuka BMKG. Cuaca: API prakiraan BMKG. Peta dasar: OpenStreetMap. Status tsunami harus diverifikasi melalui pengumuman resmi InaTEWS/BMKG.", color = fg.copy(alpha = .6f), fontSize = 11.sp)
                 }
             }
         }
