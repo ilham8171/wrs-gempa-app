@@ -1445,7 +1445,7 @@ private fun WeatherPage(fg: Color, card: Color, padding: PaddingValues) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Peringatan dini cuaca", color = fg, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                     Text("Peringatan resmi dan wilayah terdampak harus diverifikasi melalui BMKG. Prakiraan umum bukan pengganti peringatan dini.", color = fg.copy(alpha = .72f), fontSize = 12.sp)
-                    Button(onClick = { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.bmkg.go.id/cuaca/peringatan-dini-cuaca"))) }, modifier = Modifier.fillMaxWidth()) {
+                    Button(onClick = { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.bmkg.go.id/cuaca/peringatan-dini-cuaca"))) } }, modifier = Modifier.fillMaxWidth()) {
                         Icon(Icons.Default.Warning, null); Spacer(Modifier.width(6.dp)); Text("Buka Peringatan Dini BMKG")
                     }
                 }
