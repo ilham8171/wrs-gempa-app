@@ -252,9 +252,9 @@ private fun parseQuake(obj: JSONObject): Quake? {
     val magnitude = magnitudeText.toDoubleOrNull() ?: return null
     val coord = obj.optString("Coordinates", "").trim()
     val coordParts = coord.split(",")
-    val lat = parseCoordinate(obj.optString("Lintang", "")) ?: coordParts.getOrNull(0)?.trim()?.toDoubleOrNull()
+    val lat = parseCoordinate(obj.optString("Lintang", "")) ?: coordParts.getOrNull(0)?.let(::parseCoordinate)
         ?: return null
-    val lon = parseCoordinate(obj.optString("Bujur", "")) ?: coordParts.getOrNull(1)?.trim()?.toDoubleOrNull()
+    val lon = parseCoordinate(obj.optString("Bujur", "")) ?: coordParts.getOrNull(1)?.let(::parseCoordinate)
         ?: return null
     if (!magnitude.isFinite() || magnitude !in 0.0..10.0 ||
         !lat.isFinite() || lat !in -90.0..90.0 ||
