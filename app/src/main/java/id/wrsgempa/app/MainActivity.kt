@@ -285,10 +285,17 @@ private fun WrsGempaApp() {
             val wrs = fetchWrsData()
             val recentJson = wrs.optJSONArray("recent") ?: JSONArray()
             val parsedRecent = (0 until recentJson.length()).mapNotNull { i -> recentJson.optJSONObject(i)?.let(::parseWrsQuake) }
+
+            // BMKG's public feeds are authoritative for latest, M5+, and felt categories.
+            // Keep the existing WRS endpoint as a resilient secondary source.
+            val bmkgLatest = runCatching { fetchBmkgQuakes("autogempa.json") }.getOrDefault(emptyList())
+            val bmkgM5 = runCatching { fetchBmkgQuakes("gempaterkini.json") }.getOrDefault(emptyList())
+            val bmkgFelt = runCatching { fetchBmkgQuakes("gempadirasakan.json") }.getOrDefault(emptyList())
             val preferredLatest = (wrs.optJSONObject("official") ?: wrs.optJSONObject("latest"))?.let(::parseWrsQuake)
-            latest = preferredLatest ?: parsedRecent.firstOrNull()
-            quakes = parsedRecent.distinctBy(::quakeKey)
-            feltQuakes = parsedRecent.filter { it.felt.isNotBlank() }
+            latest = bmkgLatest.firstOrNull() ?: preferredLatest ?: parsedRecent.firstOrNull()
+            quakes = (bmkgLatest + parsedRecent).distinctBy(::quakeKey)
+            m5Quakes = bmkgM5.filter { it.magnitudeValue >= 5.0 }.distinctBy(::quakeKey)
+            feltQuakes = (bmkgFelt + parsedRecent.filter { it.felt.isNotBlank() }).distinctBy(::quakeKey)
             val tsunamiJson = wrs.optJSONArray("tsunamiHistory") ?: JSONArray()
             val tsunamiItems = (0 until tsunamiJson.length()).mapNotNull { i ->
                 val item = tsunamiJson.optJSONObject(i) ?: return@mapNotNull null
