@@ -1402,113 +1402,210 @@ private fun TsunamiPage(latest: Quake?, history: List<Quake>, fg: Color, card: C
 
 @Composable
 private fun WeatherPage(fg: Color, card: Color, padding: PaddingValues, prefs: android.content.SharedPreferences) {
-    var code by remember { mutableStateOf(prefs.getString("weather_adm4", "") ?: "") }
     var place by remember { mutableStateOf(prefs.getString("weather_place", "") ?: "") }
     var entries by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
-    var warning by remember { mutableStateOf("Peringatan dini belum diperiksa.") }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     var updated by remember { mutableStateOf("") }
+    var locationText by remember { mutableStateOf("Lokasi perangkat belum dibaca.") }
+    var location by remember { mutableStateOf<Location?>(null) }
     val scope = rememberCoroutineScope()
     val ctx = LocalContext.current
+
+    fun readDeviceLocation(): Location? {
+        val fine = ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val coarse = ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        if (!fine && !coarse) return null
+        val manager = ctx.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        return listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
+            .mapNotNull { provider -> runCatching { manager.getLastKnownLocation(provider) }.getOrNull() }
+            .maxByOrNull { it.time }
+    }
+
+    val locationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        val loc = readDeviceLocation()
+        if (loc == null) {
+            locationText = "Lokasi belum tersedia. Aktifkan GPS/lokasi perangkat lalu tekan Coba lagi."
+        } else {
+            location = loc
+            locationText = "GPS perangkat terdeteksi"
+        }
+    }
+
+    fun loadForecast(loc: Location) {
+        busy = true
+        error = ""
+        scope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    // Reverse geocode GPS to human-readable village/city; user never has to enter an administrative code.
+                    val address = runCatching {
+                        val geocoder = android.location.Geocoder(ctx, java.util.Locale("id", "ID"))
+                        @Suppress("DEPRECATION")
+                        geocoder.getFromLocation(loc.latitude, loc.longitude, 1)?.firstOrNull()
+                    }.getOrNull()
+                    val names = listOfNotNull(
+                        address?.subLocality, address?.locality, address?.subAdminArea,
+                        address?.adminArea
+                    ).map { it.trim() }.filter { it.isNotBlank() }.distinct()
+                    val query = (names.firstOrNull() ?: address?.featureName ?: "").trim()
+                    if (query.isBlank()) throw IllegalStateException("Nama lokasi dari GPS belum terbaca. Pastikan lokasi aktif dan coba lagi.")
+
+                    // Public region lookup is only used to resolve BMKG's administrative village code.
+                    val searchUrl = URL("https://bmkg-restapi.vercel.app/v1/wilayah/search?q=" +
+                        java.net.URLEncoder.encode(query, "UTF-8"))
+                    val searchConn = searchUrl.openConnection() as HttpURLConnection
+                    searchConn.connectTimeout = 10000
+                    searchConn.readTimeout = 12000
+                    val searchBody = searchConn.inputStream.bufferedReader().use { it.readText() }
+                    searchConn.disconnect()
+                    val searchRoot = JSONObject(searchBody)
+                    val matches = searchRoot.optJSONArray("data")
+                        ?: searchRoot.optJSONArray("results")
+                        ?: searchRoot.optJSONArray("wilayah")
+                        ?: JSONArray()
+                    var bestCode = ""
+                    var bestName = query
+                    var bestDistance = Float.MAX_VALUE
+                    for (i in 0 until matches.length()) {
+                        val item = matches.optJSONObject(i) ?: continue
+                        val code = item.optString("code", item.optString("adm4", item.optString("kode", "")))
+                        if (code.isBlank()) continue
+                        val lat = item.optDouble("lat", Double.NaN)
+                        val lon = item.optDouble("lon", item.optDouble("lng", Double.NaN))
+                        val distance = if (lat.isFinite() && lon.isFinite()) {
+                            val out = FloatArray(1)
+                            Location.distanceBetween(loc.latitude, loc.longitude, lat, lon, out)
+                            out[0]
+                        } else Float.MAX_VALUE
+                        if (bestCode.isBlank() || distance < bestDistance) {
+                            bestCode = code
+                            bestDistance = distance
+                            bestName = listOf("desa", "village", "kelurahan", "kecamatan", "kotkab", "kabupaten", "provinsi")
+                                .map { item.optString(it).takeIf(String::isNotBlank) }
+                                .filterNotNull().distinct().joinToString(", ").ifBlank { query }
+                        }
+                    }
+                    if (bestCode.isBlank()) throw IllegalStateException("Wilayah dari GPS belum cocok dengan data prakiraan BMKG. Coba perbarui lokasi beberapa saat lagi.")
+                    val forecastConn = URL("https://api.bmkg.go.id/publik/prakiraan-cuaca?adm4=" + bestCode).openConnection() as HttpURLConnection
+                    forecastConn.connectTimeout = 10000
+                    forecastConn.readTimeout = 15000
+                    val root = JSONObject(forecastConn.inputStream.bufferedReader().use { it.readText() })
+                    forecastConn.disconnect()
+                    val locObj = root.optJSONObject("lokasi")
+                    val officialName = listOf("desa", "kecamatan", "kotkab", "provinsi")
+                        .map { locObj?.optString(it).orEmpty() }
+                        .filter { it.isNotBlank() && it != "null" }.distinct().joinToString(", ")
+                    val out = mutableListOf<JSONObject>()
+                    val data = root.optJSONArray("data")
+                    for (i in 0 until (data?.length() ?: 0)) {
+                        val groups = data?.optJSONObject(i)?.optJSONArray("cuaca") ?: continue
+                        for (j in 0 until groups.length()) {
+                            val group = groups.optJSONArray(j) ?: continue
+                            for (k in 0 until group.length()) group.optJSONObject(k)?.let { out.add(it) }
+                        }
+                    }
+                    val forecasts = out.distinctBy { it.optString("local_datetime") }.take(24)
+                    if (forecasts.isEmpty()) throw IllegalStateException("BMKG belum mengirim prakiraan untuk lokasi ini.")
+                    Triple(if (officialName.isBlank()) bestName else officialName, forecasts, bestCode)
+                }
+                place = result.first
+                entries = result.second
+                prefs.edit().putString("weather_adm4", result.third)
+                    .putString("weather_place", place)
+                    .putString("weather_cache", JSONArray().apply { entries.forEach { put(it) } }.toString())
+                    .putLong("weather_cache_at", System.currentTimeMillis()).apply()
+                updated = java.text.SimpleDateFormat("dd MMM yyyy, HH:mm", java.util.Locale("id", "ID")).format(java.util.Date())
+                locationText = "Lokasi perangkat digunakan untuk memilih prakiraan terdekat."
+            } catch (e: Exception) {
+                error = e.message ?: "Gagal mengambil prakiraan. Periksa koneksi dan izin lokasi."
+            } finally { busy = false }
+        }
+    }
+
     LaunchedEffect(Unit) {
         runCatching {
             val arr = JSONArray(prefs.getString("weather_cache", "[]"))
             entries = (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }
-            if (entries.isNotEmpty()) updated = "Cache lokal • bukan data live"
+            if (entries.isNotEmpty()) updated = "Data tersimpan • perbarui untuk data terbaru"
+        }
+        val loc = readDeviceLocation()
+        if (loc != null) {
+            location = loc
+            locationText = "GPS perangkat terdeteksi"
+            loadForecast(loc)
         }
     }
+
     LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item { Header(fg, "Cuaca BMKG", "Prakiraan resmi dan peringatan dini") }
+        item { Header(fg, "Cuaca di Lokasi Saya", "Prakiraan BMKG otomatis berdasarkan GPS perangkat") }
         item {
             Card(colors = CardDefaults.cardColors(containerColor = card), shape = RoundedCornerShape(18.dp)) {
                 Column(Modifier.padding(16.dp)) {
-                    Text("Kode wilayah adm4", color = fg, fontWeight = FontWeight.Bold)
-                    Text("Masukkan kode desa/kelurahan BMKG 10 digit agar lokasi tidak ditebak.", color = fg.copy(alpha=.7f), fontSize=11.sp)
-                    OutlinedTextField(value=code,onValueChange={code=it.filter(Char::isDigit).take(10)},label={Text("Kode adm4 (10 digit)")},singleLine=true,modifier=Modifier.fillMaxWidth())
-                    Button(enabled=!busy,onClick={
-                        if(!Regex("^\\d{10}$").matches(code)) { error="Kode adm4 harus terdiri dari 10 digit."; return@Button }
-                        busy=true; error=""
-                        scope.launch {
-                            try {
-                                val result=withContext(Dispatchers.IO) {
-                                    val c=URL("https://api.bmkg.go.id/publik/prakiraan-cuaca?adm4=$code").openConnection() as HttpURLConnection
-                                    c.connectTimeout=10000;c.readTimeout=12000
-                                    val root=JSONObject(c.inputStream.bufferedReader().use{it.readText()});c.disconnect()
-                                    val loc=root.optJSONObject("lokasi")
-                                    val name=listOf("desa","kecamatan","kotkab","provinsi").map{loc?.optString(it).orEmpty()}.filter{it.isNotBlank()&&it!="null"}.distinct().joinToString(", ")
-                                    val out=mutableListOf<JSONObject>(); val data=root.optJSONArray("data")
-                                    for(i in 0 until (data?.length()?:0)) {
-                                        val groups=data?.optJSONObject(i)?.optJSONArray("cuaca")?:continue
-                                        for(j in 0 until groups.length()) {
-                                            val group=groups.optJSONArray(j)
-                                            if(group!=null) for(k in 0 until group.length()) group.optJSONObject(k)?.let{out.add(it)}
-                                        }
-                                    }
-                                    name to out.distinctBy{it.optString("local_datetime")}.take(24)
-                                }
-                                place=result.first.ifBlank{"Kode wilayah $code"}; entries=result.second
-                                if(entries.isEmpty()) error="Respons BMKG tidak berisi periode prakiraan untuk kode tersebut."
-                                else {
-                                    prefs.edit().putString("weather_adm4",code).putString("weather_place",place).putString("weather_cache",JSONArray().apply{entries.forEach{put(it)}}.toString()).putLong("weather_cache_at",System.currentTimeMillis()).apply()
-                                    updated=java.text.SimpleDateFormat("dd MMM HH:mm",java.util.Locale("id","ID")).format(java.util.Date())
-                                }
-                                warning=withContext(Dispatchers.IO) {
-                                    runCatching {
-                                        val c=URL("https://www.bmkg.go.id/alerts/nowcast/id").openConnection() as HttpURLConnection
-                                        c.connectTimeout=8000;c.readTimeout=8000
-                                        val body=c.inputStream.bufferedReader().use{it.readText()};c.disconnect()
-                                        if (body.isNotBlank()) "Laman peringatan berhasil diakses. Untuk daftar peringatan aktif, wilayah terdampak, dan masa berlaku, buka laman resmi BMKG."
-                                        else "Respons laman peringatan kosong. Periksa status langsung di laman resmi BMKG."
-                                    }.getOrElse{"Feed peringatan tidak dapat diakses. Ini tidak berarti tidak ada peringatan."}
-                                }
-                            } catch(e:Exception) { error="Gagal memuat data BMKG. Periksa koneksi dan kode wilayah."; }
-                            finally { busy=false }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.MyLocation, null, tint = Blue, modifier = Modifier.size(26.dp))
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Lokasi perangkat", color = fg, fontWeight = FontWeight.Bold)
+                            Text(locationText, color = fg.copy(alpha = .7f), fontSize = 11.sp)
                         }
-                    },modifier=Modifier.fillMaxWidth().padding(top=8.dp)) {
-                        if(busy) CircularProgressIndicator(Modifier.size(18.dp),strokeWidth=2.dp) else Icon(Icons.Default.CloudDownload,null)
-                        Spacer(Modifier.width(8.dp));Text(if(busy)"Memuat…" else "Ambil prakiraan BMKG")
                     }
-                    if(error.isNotBlank()) Text(error,color=Color(0xFFD32F2F),fontSize=12.sp,modifier=Modifier.padding(top=6.dp))
+                    Spacer(Modifier.height(10.dp))
+                    Button(enabled = !busy, onClick = {
+                        val fine = ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                        val coarse = ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                        if (!fine && !coarse) locationPermission.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+                        else {
+                            val loc = readDeviceLocation()
+                            if (loc == null) error = "Lokasi GPS belum tersedia. Aktifkan Lokasi pada perangkat lalu coba lagi."
+                            else { location = loc; loadForecast(loc) }
+                        }
+                    }, modifier = Modifier.fillMaxWidth()) {
+                        if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        else Icon(Icons.Default.MyLocation, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(if (busy) "Mencari lokasi & prakiraan…" else "Gunakan GPS / Perbarui")
+                    }
+                    if (error.isNotBlank()) Text(error, color = Color(0xFFD32F2F), fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
                 }
             }
         }
-        if(place.isNotBlank()) item {
-            Card(colors=CardDefaults.cardColors(containerColor=Navy),shape=RoundedCornerShape(18.dp)) {
+        if (place.isNotBlank()) item {
+            Card(colors = CardDefaults.cardColors(containerColor = Navy), shape = RoundedCornerShape(18.dp)) {
                 Column(Modifier.padding(16.dp)) {
-                    Text(place,color=Color.White,fontSize=18.sp,fontWeight=FontWeight.ExtraBold)
-                    Text(updated,color=Color(0xFFB9D4FF),fontSize=11.sp)
+                    Text(place, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+                    Text("Diperbarui: $updated", color = Color(0xFFB9D4FF), fontSize = 11.sp)
                 }
             }
         }
         item {
-            Card(colors=CardDefaults.cardColors(containerColor=card),shape=RoundedCornerShape(18.dp)) {
+            Card(colors = CardDefaults.cardColors(containerColor = card), shape = RoundedCornerShape(18.dp)) {
                 Column(Modifier.padding(16.dp)) {
-                    Text("Peringatan dini cuaca BMKG",color=fg,fontWeight=FontWeight.Bold)
-                    Text(warning,color=fg.copy(alpha=.8f),fontSize=12.sp,modifier=Modifier.padding(top=5.dp))
-                    TextButton(onClick={runCatching{ctx.startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://www.bmkg.go.id/alerts/nowcast/id")))}}){Text("Buka laman resmi BMKG")}
+                    Text("Peringatan dini cuaca", color = fg, fontWeight = FontWeight.Bold)
+                    Text("Untuk peringatan aktif dan instruksi keselamatan, cek pengumuman resmi BMKG. Prakiraan biasa bukan pengganti peringatan darurat.", color = fg.copy(alpha = .8f), fontSize = 12.sp, modifier = Modifier.padding(top = 5.dp))
+                    TextButton(onClick = { runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://www.bmkg.go.id/alerts/nowcast/id"))) } }) { Text("Lihat peringatan resmi BMKG") }
                 }
             }
         }
-        item { Text("Prakiraan per periode (maksimal 24 entri)",color=fg,fontWeight=FontWeight.Bold,fontSize=16.sp) }
+        item { Text("Prakiraan 3 hari • per 3 jam", color = fg, fontWeight = FontWeight.Bold, fontSize = 16.sp) }
         items(entries) { p ->
-            Card(colors=CardDefaults.cardColors(containerColor=card),shape=RoundedCornerShape(16.dp)) {
-                Row(Modifier.fillMaxWidth().padding(14.dp),verticalAlignment=Alignment.CenterVertically) {
-                    Icon(Icons.Default.Cloud,tint=Blue,contentDescription=null,modifier=Modifier.size(30.dp));Spacer(Modifier.width(12.dp))
+            Card(colors = CardDefaults.cardColors(containerColor = card), shape = RoundedCornerShape(16.dp)) {
+                Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Cloud, tint = Blue, contentDescription = null, modifier = Modifier.size(30.dp))
+                    Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(p.optString("local_datetime","—"),color=fg,fontWeight=FontWeight.Bold,fontSize=12.sp)
-                        Text(p.optString("weather_desc","Kondisi tidak tersedia"),color=fg,fontSize=14.sp)
-                        Text("Angin ${p.optString("ws","—")} km/j • ${p.optString("wd","—")} • Kelembapan ${p.optString("hu","—")}%",color=fg.copy(alpha=.65f),fontSize=10.sp)
+                        Text(p.optString("local_datetime", "—"), color = fg, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Text(p.optString("weather_desc", "Kondisi cuaca tidak tersedia"), color = fg, fontSize = 14.sp)
+                        Text("Angin ${p.optString("ws", "—")} km/j • ${p.optString("wd", "—")} • Kelembapan ${p.optString("hu", "—")}%", color = fg.copy(alpha = .65f), fontSize = 10.sp)
                     }
-                    Text("${p.optString("t","—")}°C",color=fg,fontSize=20.sp,fontWeight=FontWeight.ExtraBold)
+                    Text("${p.optString("t", "—")}°C", color = fg, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
                 }
             }
         }
-        if(entries.isEmpty()) item { Text("Belum ada prakiraan. Masukkan kode adm4 lalu ambil data resmi BMKG.",color=fg.copy(alpha=.7f)) }
-        item { Text("Sumber: BMKG. Data cache diberi label; prakiraan bukan pengganti peringatan darurat.",color=fg.copy(alpha=.65f),fontSize=10.sp) }
+        if (entries.isEmpty()) item { Text("Prakiraan akan tampil otomatis setelah izin lokasi diberikan.", color = fg.copy(alpha = .7f)) }
+        item { Text("Sumber prakiraan: BMKG. Kode wilayah dicari otomatis di latar belakang; pengguna tidak perlu memasukkan kode.", color = fg.copy(alpha = .65f), fontSize = 10.sp) }
     }
 }
-
 
 @Composable
 private fun NearbyPage(quakes: List<Quake>, fg: Color, card: Color, padding: PaddingValues, open: (Quake) -> Unit) {
