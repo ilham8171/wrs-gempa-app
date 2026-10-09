@@ -971,7 +971,7 @@ private fun DetailPage(quake: Quake, fg: Color, card: Color, back: () -> Unit, p
                 Text("ShakeMap BMKG", color = fg, fontWeight = FontWeight.Bold, fontSize = 17.sp)
                 Card(colors = CardDefaults.cardColors(containerColor = card), shape = RoundedCornerShape(18.dp)) {
                     Column(Modifier.padding(8.dp)) {
-                        RemoteImage(if (quake.shakemap.startsWith("http")) quake.shakemap else "https://static.bmkg.go.id/" + quake.shakemap)
+                        RemoteImage(if (quake.shakemap.startsWith("http")) quake.shakemap else "https://bmkg-content-inatews.storage.googleapis.com/" + quake.shakemap)
                         Text("Peta guncangan BMKG • " + quake.shakemap, color = fg.copy(alpha = .6f), fontSize = 10.sp, modifier = Modifier.padding(6.dp))
                     }
                 }
@@ -1176,7 +1176,7 @@ private fun ShakeMapsPage(items: List<Quake>, fg: Color, card: Color, padding: P
             Card(colors = CardDefaults.cardColors(containerColor = card), shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth().clickable { open(q) }) {
                 Column(Modifier.padding(8.dp)) {
                     Text("M " + q.magnitude + " • " + q.location, color = fg, fontWeight = FontWeight.Bold, modifier = Modifier.padding(8.dp))
-                    RemoteImage(if (q.shakemap.startsWith("http")) q.shakemap else "https://static.bmkg.go.id/" + q.shakemap)
+                    RemoteImage(if (q.shakemap.startsWith("http")) q.shakemap else "https://bmkg-content-inatews.storage.googleapis.com/" + q.shakemap)
                 }
             }
         }
