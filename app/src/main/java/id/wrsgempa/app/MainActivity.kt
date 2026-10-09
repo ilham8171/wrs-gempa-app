@@ -410,7 +410,7 @@ private fun latestTsunamiBulletins(items: List<Quake>): List<Quake> =
         .mapNotNull { bulletins ->
             // timesent is an ISO timestamp from the CAP feed and sorts chronologically.
             // Fall back to event time only for older cached records without issue time.
-            bulletins.maxByOrNull { it.warningUpdatedAt?.ifBlank { null } ?: (it.date + " " + it.time) }
+            bulletins.maxByOrNull { it.warningUpdatedAt?.takeIf { stamp -> stamp.isNotBlank() } ?: (it.date + " " + it.time) }
         }
 
 private fun tsunamiStatus(q: Quake?): Pair<String, Color> {
