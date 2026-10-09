@@ -104,7 +104,9 @@ data class Quake(
     val shakemap: String = "",
     val id: String = "",
     val source: String = "WRS GEMPA",
-    val warningEnded: Boolean? = null
+    val warningEnded: Boolean? = null,
+    val warningEventId: String? = null,
+    val warningUpdatedAt: String? = null
 ) {
     val magnitudeValue: Double get() = magnitude.replace(",", ".").toDoubleOrNull() ?: 0.0
 }
