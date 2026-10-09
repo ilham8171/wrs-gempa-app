@@ -561,6 +561,8 @@ private fun WrsGempaApp(
                     put("potential", item.optString("headline", item.optString("subject", item.optString("potential", "Peringatan tsunami InaTEWS"))))
                     put("source", "InaTEWS")
                     put("warningEnded", item.optBoolean("ended", false))
+                    put("warningEventId", item.optString("eventid").ifBlank { item.optString("key", "tsunami-" + i) })
+                    put("warningUpdatedAt", item.optString("timesent"))
                     put("felt", item.optString("description", item.optString("instruction", "")))
                     put("shakemap", item.optString("shakemap", ""))
                 }
