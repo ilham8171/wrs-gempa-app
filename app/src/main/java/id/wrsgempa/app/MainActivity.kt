@@ -1599,6 +1599,7 @@ private fun WeatherPage(fg: Color, card: Color, padding: PaddingValues, prefs: a
                 Column(Modifier.padding(16.dp)) {
                     Text(place, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
                     Text("Diperbarui: $updated", color = Color(0xFFB9D4FF), fontSize = 11.sp)
+                    Text("Sumber prakiraan: BMKG • Lokasi dipilih dari GPS perangkat", color = Color(0xFFD8E6FF), fontSize = 10.sp, modifier = Modifier.padding(top = 4.dp))
                 }
             }
         }
