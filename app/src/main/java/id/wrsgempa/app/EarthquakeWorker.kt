@@ -8,6 +8,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Location
+import android.media.AudioAttributes
+import android.media.RingtoneManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -225,12 +227,36 @@ class EarthquakeWorker(context: Context, params: WorkerParameters) : CoroutineWo
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && ContextCompat.checkSelfPermission(applicationContext, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return Result.success()
             val manager = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                manager.createNotificationChannel(NotificationChannel("wrs_gempa_alerts", "Peringatan WRS GEMPA", NotificationManager.IMPORTANCE_HIGH).apply { description = "Peringatan gempa dan tsunami dari backend WRS GEMPA" })
+                if (manager.getNotificationChannel(QUAKE_CHANNEL_ID) == null) {
+                    manager.createNotificationChannel(NotificationChannel(
+                        QUAKE_CHANNEL_ID, "Notifikasi Gempa", NotificationManager.IMPORTANCE_HIGH
+                    ).apply {
+                        description = "Pembaruan gempa resmi dan gempa yang dirasakan"
+                        enableVibration(true)
+                    })
+                }
+                if (manager.getNotificationChannel(TSUNAMI_CHANNEL_ID) == null) {
+                    manager.createNotificationChannel(NotificationChannel(
+                        TSUNAMI_CHANNEL_ID, "Peringatan Tsunami", NotificationManager.IMPORTANCE_HIGH
+                    ).apply {
+                        description = "Peringatan tsunami; ikuti instruksi resmi BMKG/InaTEWS"
+                        enableVibration(true)
+                        vibrationPattern = longArrayOf(0, 500, 200, 500, 200, 900)
+                        setSound(
+                            RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM),
+                            AudioAttributes.Builder()
+                                .setUsage(AudioAttributes.USAGE_ALARM)
+                                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                                .build()
+                        )
+                    })
+                }
             }
             for (alert in alerts.distinctBy { it.category + "|" + it.fingerprint }) {
                 if (wasNotified(prefs, alert.category, alert.fingerprint)) continue
                 val notificationId = (alert.category + alert.fingerprint).hashCode()
-                val notification = NotificationCompat.Builder(applicationContext, "wrs_gempa_alerts")
+                val channelId = if (alert.category == "tsunami") TSUNAMI_CHANNEL_ID else QUAKE_CHANNEL_ID
+                val notification = NotificationCompat.Builder(applicationContext, channelId)
                     .setSmallIcon(android.R.drawable.ic_dialog_alert)
                     .setContentTitle(alert.title)
                     .setContentText(alert.body)
@@ -238,11 +264,17 @@ class EarthquakeWorker(context: Context, params: WorkerParameters) : CoroutineWo
                     .setPriority(NotificationCompat.PRIORITY_HIGH)
                     .setAutoCancel(true)
                     .setContentIntent(notificationPendingIntent(alert, notificationId))
+                    .setVibrate(longArrayOf(0, 250, 120, 250))
                     .build()
                 NotificationManagerCompat.from(applicationContext).notify(notificationId, notification)
                 rememberNotified(prefs, alert.category, alert.fingerprint)
             }
             Result.success()
         } catch (_: Exception) { Result.retry() }
+    }
+
+    companion object {
+        private const val QUAKE_CHANNEL_ID = "wrs_gempa_alerts_v2"
+        private const val TSUNAMI_CHANNEL_ID = "wrs_tsunami_alerts_v2"
     }
 }
