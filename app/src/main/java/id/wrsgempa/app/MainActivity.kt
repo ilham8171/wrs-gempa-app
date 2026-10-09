@@ -315,6 +315,8 @@ private fun quakeJson(q: Quake): JSONObject = JSONObject().apply {
     put("id", q.id)
     put("source", q.source)
     q.warningEnded?.let { put("warningEnded", it) }
+    q.warningEventId?.let { put("warningEventId", it) }
+    q.warningUpdatedAt?.let { put("warningUpdatedAt", it) }
 }
 
 private fun quakeFromNotificationIntent(intent: Intent): Quake? {
@@ -366,7 +368,9 @@ private fun quakeFromJson(obj: JSONObject): Quake? {
         shakemap = obj.optString("shakemap"),
         id = obj.optString("id"),
         source = obj.optString("source", "WRS GEMPA").ifBlank { "WRS GEMPA" },
-        warningEnded = if (obj.has("warningEnded") && !obj.isNull("warningEnded")) obj.optBoolean("warningEnded") else null
+        warningEnded = if (obj.has("warningEnded") && !obj.isNull("warningEnded")) obj.optBoolean("warningEnded") else null,
+        warningEventId = obj.optString("warningEventId").takeIf { it.isNotBlank() },
+        warningUpdatedAt = obj.optString("warningUpdatedAt").takeIf { it.isNotBlank() }
     )
 }
 
