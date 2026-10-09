@@ -12,8 +12,6 @@ import android.location.Location
 import android.location.LocationManager
 import android.os.Build
 import android.os.Bundle
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -57,6 +55,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import org.osmdroid.config.Configuration
+import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.util.GeoPoint
+import org.osmdroid.views.MapView
+import org.osmdroid.views.overlay.Marker
 import androidx.core.content.ContextCompat
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
@@ -678,7 +681,7 @@ private fun WrsGempaApp(
                     subPage == 9 -> ShakeMapsPage(history.filter { it.shakemap.isNotBlank() }, fg, card, padding, { selected = it })
                     else -> when (tab) {
                         0 -> HomePage(latest, quakes, feltQuakes, m5Quakes.size, loading, error, lastUpdated, fg, card, dark, { dark = !dark }, { refreshAction() }, { selected = it }, { tab = 1 }, { subPage = 6 }, padding)
-                        1 -> MapPage(lastUpdated, fg, padding, { subPage = 8 }, { subPage = 9 })
+                        1 -> MapPage(quakes + listOfNotNull(latest), lastUpdated, fg, card, padding, { selected = it }, { subPage = 8 }, { subPage = 9 })
                         2 -> QuakeListPage(quakes, feltQuakes, m5Quakes, history.filter(::isTsunamiPotential), filter, { filter = it }, fg, card, padding, { selected = it })
                         3 -> NotificationPage(latest, quakes, bigAlerts, { bigAlerts = it; prefs.edit().putBoolean("big_alerts", it).apply() }, feltAlerts, { feltAlerts = it; prefs.edit().putBoolean("felt_alerts", it).apply() }, tsunamiAlerts, { tsunamiAlerts = it; prefs.edit().putBoolean("tsunami_alerts", it).apply() }, nearbyAlerts, { nearbyAlerts = it; prefs.edit().putBoolean("nearby_alerts", it).apply() }, minMagnitude, { minMagnitude = it; prefs.edit().putString("min_magnitude", it).apply() }, radius, { radius = it; prefs.edit().putString("radius", it).apply() }, fg, card, padding, { selected = it })
                         else -> MorePage(fg, card, dark, { dark = !dark }, padding, { page -> subPage = page })
@@ -929,45 +932,74 @@ private fun QuakeListPage(quakes: List<Quake>, felt: List<Quake>, m5: List<Quake
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-private fun MapPage(lastUpdated: String, fg: Color, padding: PaddingValues, openHistory: () -> Unit, openShakemap: () -> Unit) {
+private fun MapPage(quakes: List<Quake>, lastUpdated: String, fg: Color, card: Color, padding: PaddingValues, openQuake: (Quake) -> Unit, openHistory: () -> Unit, openShakemap: () -> Unit) {
+    val context = LocalContext.current
+    var minMagnitude by remember { mutableFloatStateOf(0f) }
+    var mapError by remember { mutableStateOf(false) }
+    var mapReady by remember { mutableStateOf(false) }
+    val filtered = remember(quakes, minMagnitude) { quakes.distinctBy(::quakeKey).filter { it.magnitudeValue >= minMagnitude } }
+    DisposableEffect(Unit) { Configuration.getInstance().userAgentValue = context.packageName; onDispose { } }
     Column(Modifier.fillMaxSize().padding(padding)) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-            Header(fg, "Monitoring Gempa Realtime", "Peta langsung dari WRS GEMPA milikmu")
+            Header(fg, "Peta Monitoring", "OpenStreetMap • marker dari feed gempa")
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Surface(color = Color(0xFFDDF7EA), shape = RoundedCornerShape(20.dp)) {
-                    Text("LIVE • WRS GEMPA", color = Color(0xFF11774A), fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp))
+                Text("Data terakhir: " + lastUpdated + " WIB", color = fg.copy(alpha = .65f), fontSize = 10.sp, modifier = Modifier.weight(1f))
+                Text(filtered.size.toString() + " marker", color = fg, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+            }
+            Text("Magnitudo minimum: " + "%.1f".format(java.util.Locale.US, minMagnitude), color = fg, fontSize = 11.sp)
+            Slider(value = minMagnitude, onValueChange = { minMagnitude = it }, valueRange = 0f..6f, steps = 11)
+        }
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            AndroidView(modifier = Modifier.fillMaxSize(), factory = { ctx ->
+                MapView(ctx).apply {
+                    try {
+                        setTileSource(TileSourceFactory.MAPNIK)
+                        setMultiTouchControls(true)
+                        controller.setZoom(4.5)
+                        controller.setCenter(GeoPoint(-2.5, 118.0))
+                        mapReady = true
+                        filtered.forEach { q ->
+                            val marker = Marker(this)
+                            marker.position = GeoPoint(q.latitude, q.longitude)
+                            marker.title = "M " + q.magnitude + " • " + q.location
+                            marker.snippet = q.date + " " + q.time + " • " + q.depth
+                            marker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                            marker.setOnMarkerClickListener { _, _ -> openQuake(q); true }
+                            overlays.add(marker)
+                        }
+                    } catch (_: Exception) { mapError = true }
                 }
-                Spacer(Modifier.width(8.dp))
-                Column {
-                    Text("Jam sekarang", color = fg.copy(alpha = .6f), fontSize = 9.sp)
-                    LiveWibClock(fg)
-                    Text("Data terakhir: " + lastUpdated + " WIB", color = fg.copy(alpha = .68f), fontSize = 10.sp)
+            }, update = { map ->
+                runCatching {
+                    map.overlays.removeAll { it is Marker }
+                    filtered.forEach { q ->
+                        val marker = Marker(map)
+                        marker.position = GeoPoint(q.latitude, q.longitude)
+                        marker.title = "M " + q.magnitude + " • " + q.location
+                        marker.snippet = q.date + " " + q.time + " • " + q.depth
+                        marker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                        marker.setOnMarkerClickListener { _, _ -> openQuake(q); true }
+                        map.overlays.add(marker)
+                    }
+                    map.invalidate(); mapError = false
+                }.onFailure { mapError = true }
+            })
+            if (!mapReady && !mapError) CircularProgressIndicator(Modifier.align(Alignment.Center))
+            if (mapError) Card(Modifier.align(Alignment.Center).padding(18.dp), colors = CardDefaults.cardColors(containerColor = card)) {
+                Column(Modifier.padding(18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Default.Map, null, tint = fg)
+                    Text("Peta tidak dapat dimuat", color = fg, fontWeight = FontWeight.Bold)
+                    Text("Periksa koneksi internet lalu coba lagi.", color = fg.copy(alpha = .7f), fontSize = 12.sp)
                 }
             }
         }
-        Row(Modifier.padding(horizontal = 14.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.padding(10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = openHistory, modifier = Modifier.weight(1f)) { Icon(Icons.Default.History, null); Spacer(Modifier.width(4.dp)); Text("Riwayat") }
             OutlinedButton(onClick = openShakemap, modifier = Modifier.weight(1f)) { Icon(Icons.Default.Image, null); Spacer(Modifier.width(4.dp)); Text("ShakeMaps") }
         }
-        Spacer(Modifier.height(8.dp))
-        AndroidView(
-            modifier = Modifier.weight(1f).fillMaxWidth(),
-            factory = { ctx ->
-                WebView(ctx).apply {
-                    webViewClient = WebViewClient()
-                    settings.javaScriptEnabled = true
-                    settings.domStorageEnabled = true
-                    settings.loadWithOverviewMode = true
-                    settings.useWideViewPort = true
-                    settings.builtInZoomControls = false
-                    loadUrl("https://wrsgempa.netlify.app/")
-                }
-            }
-        )
-        Text("Monitoring WRS GEMPA • Data dari backend Netlify milikmu", color = fg.copy(alpha = .55f), fontSize = 9.sp, modifier = Modifier.padding(8.dp))
+        Text("Peta dasar OpenStreetMap • marker berdasarkan data gempa yang diterima.", color = fg.copy(alpha = .55f), fontSize = 9.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
     }
 }
-
 @Composable
 private fun DetailPage(quake: Quake, fg: Color, card: Color, back: () -> Unit, padding: PaddingValues) {
     val context = LocalContext.current
