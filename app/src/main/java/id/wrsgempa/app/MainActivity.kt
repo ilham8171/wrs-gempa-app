@@ -662,7 +662,7 @@ private fun WrsGempaApp(
                     subPage == 9 -> ShakeMapsPage(history.filter { it.shakemap.isNotBlank() }, fg, card, padding, { selected = it })
                     subPage == 10 -> WeatherPage(fg, card, padding, prefs)
                     else -> when (tab) {
-                        0 -> HomePage(latest, quakes, feltQuakes, m5Quakes.size, loading, error, lastUpdated, fg, card, dark, { dark = !dark }, { refreshAction() }, { selected = it }, { tab = 1 }, { subPage = 6 }, padding)
+                        0 -> HomePage(latest, quakes, feltQuakes, m5Quakes.size, history.any { it.warningEventId != null && it.warningEnded == false }, loading, error, lastUpdated, fg, card, dark, { dark = !dark }, { refreshAction() }, { selected = it }, { tab = 1 }, { subPage = 6 }, padding)
                         1 -> MapPage(lastUpdated, quakes + listOfNotNull(latest), fg, card, padding, { subPage = 8 }, { subPage = 9 }, { subPage = 10 })
                         2 -> QuakeListPage(quakes, feltQuakes, m5Quakes, history.filter(::isTsunamiPotential), filter, { filter = it }, fg, card, padding, { selected = it })
                         3 -> NotificationPage(latest, quakes, bigAlerts, { bigAlerts = it; prefs.edit().putBoolean("big_alerts", it).apply() }, feltAlerts, { feltAlerts = it; prefs.edit().putBoolean("felt_alerts", it).apply() }, tsunamiAlerts, { tsunamiAlerts = it; prefs.edit().putBoolean("tsunami_alerts", it).apply() }, nearbyAlerts, { nearbyAlerts = it; prefs.edit().putBoolean("nearby_alerts", it).apply() }, minMagnitude, { minMagnitude = it; prefs.edit().putString("min_magnitude", it).apply() }, radius, { radius = it; prefs.edit().putString("radius", it).apply() }, fg, card, padding, { selected = it })
@@ -695,6 +695,7 @@ private fun HomePage(
     quakes: List<Quake>,
     feltQuakes: List<Quake>,
     m5Count: Int,
+    activeTsunamiWarning: Boolean,
     loading: Boolean,
     error: String,
     lastUpdated: String,
@@ -708,7 +709,7 @@ private fun HomePage(
     openTsunami: () -> Unit,
     padding: PaddingValues
 ) {
-    val tsunami = latest?.let(::isTsunamiPotential) == true
+    val tsunami = activeTsunamiWarning
     LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
