@@ -662,7 +662,7 @@ private fun WrsGempaApp(
                     subPage == 9 -> ShakeMapsPage(history.filter { it.shakemap.isNotBlank() }, fg, card, padding, { selected = it })
                     subPage == 10 -> WeatherPage(fg, card, padding, prefs)
                     else -> when (tab) {
-                        0 -> HomePage(latest, quakes, feltQuakes, m5Quakes.size, history.any { it.warningEventId != null && it.warningEnded == false }, loading, error, lastUpdated, fg, card, dark, { dark = !dark }, { refreshAction() }, { selected = it }, { tab = 1 }, { subPage = 6 }, padding)
+                        0 -> HomePage(latest, quakes, feltQuakes, m5Quakes.size, history.any { it.warningEventId != null && it.warningEnded == false }, loading, error, lastUpdated, fg, card, dark, { dark = !dark }, { refreshAction() }, { selected = it }, { tab = 1 }, { subPage = 6 }, { subPage = 10 }, padding)
                         1 -> MapPage(lastUpdated, quakes + listOfNotNull(latest), fg, card, padding, { subPage = 8 }, { subPage = 9 }, { subPage = 10 })
                         2 -> QuakeListPage(quakes, feltQuakes, m5Quakes, history.filter(::isTsunamiPotential), filter, { filter = it }, fg, card, padding, { selected = it })
                         3 -> NotificationPage(latest, quakes, bigAlerts, { bigAlerts = it; prefs.edit().putBoolean("big_alerts", it).apply() }, feltAlerts, { feltAlerts = it; prefs.edit().putBoolean("felt_alerts", it).apply() }, tsunamiAlerts, { tsunamiAlerts = it; prefs.edit().putBoolean("tsunami_alerts", it).apply() }, nearbyAlerts, { nearbyAlerts = it; prefs.edit().putBoolean("nearby_alerts", it).apply() }, minMagnitude, { minMagnitude = it; prefs.edit().putString("min_magnitude", it).apply() }, radius, { radius = it; prefs.edit().putString("radius", it).apply() }, fg, card, padding, { selected = it })
@@ -707,8 +707,16 @@ private fun HomePage(
     open: (Quake) -> Unit,
     openMap: () -> Unit,
     openTsunami: () -> Unit,
+    openWeather: () -> Unit,
     padding: PaddingValues
 ) {
+    val context = LocalContext.current
+    val weatherPrefs = remember(context) { context.getSharedPreferences("wrs_alerts", Context.MODE_PRIVATE) }
+    val weatherEntries = remember { runCatching { val arr = JSONArray(weatherPrefs.getString("weather_cache", "[]")); (0 until arr.length()).mapNotNull { arr.optJSONObject(it) } }.getOrDefault(emptyList()) }
+    val weatherPlace = weatherPrefs.getString("weather_place", "")?.takeIf { it.isNotBlank() }
+    val weatherUpdatedAt = weatherPrefs.getLong("weather_cache_at", 0L)
+    val weatherFresh = weatherUpdatedAt > 0L && System.currentTimeMillis() - weatherUpdatedAt < 6 * 60 * 60 * 1000L
+    val nextWeather = weatherEntries.firstOrNull()
     val tsunami = activeTsunamiWarning
     LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
@@ -728,6 +736,38 @@ private fun HomePage(
                 }
             }
             Text("Sinkronisasi data berjalan diam-diam setiap 60 detik. Halaman dan peta tidak dimuat ulang otomatis.", color = fg.copy(alpha = .62f), fontSize = 10.sp)
+        }
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = card), shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth().clickable { openWeather() }) {
+                Column(Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(44.dp).background(Color(0xFFE2F1FF), RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) { Icon(Icons.Default.Cloud, null, tint = Blue, modifier = Modifier.size(26.dp)) }
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("CUACA BMKG", color = fg, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp)
+                            Text(weatherPlace ?: "Atur lokasi prakiraan cuaca", color = fg.copy(alpha = .68f), fontSize = 11.sp)
+                        }
+                        Icon(Icons.Default.ChevronRight, "Buka cuaca", tint = fg.copy(alpha = .55f))
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    if (nextWeather != null && weatherPlace != null) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.CloudQueue, null, tint = Blue, modifier = Modifier.size(42.dp)); Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(nextWeather.optString("weather_desc", "Kondisi cuaca"), color = fg, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                Text("Periode " + nextWeather.optString("local_datetime", "berikutnya"), color = fg.copy(alpha = .65f), fontSize = 10.sp)
+                            }
+                            Text(nextWeather.optString("t", "—") + "°C", color = fg, fontSize = 25.sp, fontWeight = FontWeight.Black)
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Text("Kelembapan " + nextWeather.optString("hu", "—") + "%  •  Angin " + nextWeather.optString("ws", "—") + " km/j", color = fg.copy(alpha = .72f), fontSize = 11.sp)
+                        Text(if (weatherFresh) "Prakiraan tersimpan • diperbarui " + java.text.SimpleDateFormat("dd MMM, HH:mm", java.util.Locale("id", "ID")).format(java.util.Date(weatherUpdatedAt)) else "Menampilkan cache lama • ketuk untuk memperbarui", color = if (weatherFresh) Color(0xFF16845B) else Color(0xFFB7791F), fontSize = 10.sp, modifier = Modifier.padding(top = 6.dp))
+                    } else {
+                        Text("Lihat prakiraan per periode dari BMKG. Pilih kode wilayah sekali, lalu ringkasan cuaca akan muncul di Beranda.", color = fg.copy(alpha = .78f), fontSize = 12.sp)
+                        Text("Atur lokasi cuaca →", color = Blue, fontWeight = FontWeight.Bold, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+                    }
+                }
+            }
         }
         item {
             Card(colors = CardDefaults.cardColors(containerColor = Navy), shape = RoundedCornerShape(24.dp), modifier = Modifier.fillMaxWidth().clickable(enabled = latest != null) { latest?.let(open) }) {
@@ -1370,9 +1410,8 @@ private fun WeatherPage(fg: Color, card: Color, padding: PaddingValues, prefs: a
                                         val c=URL("https://www.bmkg.go.id/alerts/nowcast/id").openConnection() as HttpURLConnection
                                         c.connectTimeout=8000;c.readTimeout=8000
                                         val body=c.inputStream.bufferedReader().use{it.readText()};c.disconnect()
-                                        val n=Regex("<alert(?:\\s|>)",RegexOption.IGNORE_CASE).findAll(body).count()
-                                        if(n>0) "Feed resmi memuat $n buletin. Buka BMKG untuk melihat wilayah terdampak dan masa berlaku."
-                                        else "Feed berhasil diperiksa; tidak terdeteksi buletin dalam respons. Periksa laman BMKG untuk status terkini."
+                                        if (body.isNotBlank()) "Laman peringatan berhasil diakses. Untuk daftar peringatan aktif, wilayah terdampak, dan masa berlaku, buka laman resmi BMKG."
+                                        else "Respons laman peringatan kosong. Periksa status langsung di laman resmi BMKG."
                                     }.getOrElse{"Feed peringatan tidak dapat diakses. Ini tidak berarti tidak ada peringatan."}
                                 }
                             } catch(e:Exception) { error="Gagal memuat data BMKG. Periksa koneksi dan kode wilayah."; }
