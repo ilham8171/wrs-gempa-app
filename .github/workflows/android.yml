@@ -17,6 +17,8 @@ jobs:
           gradle-version: '8.9'
       - name: Run unit tests
         run: gradle testDebugUnitTest
+      - name: Run Android lint
+        run: gradle lintDebug
       - name: Build debug APK
         run: gradle assembleDebug
       - name: Verify APK and enforce 500 MB maximum
