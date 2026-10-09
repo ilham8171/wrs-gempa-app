@@ -227,7 +227,9 @@ private fun parseWrsQuake(obj: JSONObject): Quake? {
         obj.optString("potential", "—"), obj.optString("felt", ""), obj.optString("shakemap", ""),
         obj.optString("key", rawTime + "|" + magnitude + "|" + lat + "|" + lon),
         obj.optString("source", "WRS GEMPA").ifBlank { "WRS GEMPA" },
-        if (obj.has("warningEnded") && !obj.isNull("warningEnded")) obj.optBoolean("warningEnded") else null)
+        if (obj.has("warningEnded") && !obj.isNull("warningEnded")) obj.optBoolean("warningEnded") else null,
+        obj.optString("warningEventId").takeIf { it.isNotBlank() },
+        obj.optString("warningUpdatedAt").takeIf { it.isNotBlank() })
 }
 private fun parseCoordinate(raw: String): Double? {
     val cleaned = raw.trim()
