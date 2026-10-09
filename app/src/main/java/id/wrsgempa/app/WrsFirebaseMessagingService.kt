@@ -5,17 +5,21 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.RingtoneManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.google.firebase.messaging.FirebaseMessaging
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
+import org.json.JSONObject
+import java.util.Locale
 
 /**
- * Receives FCM messages and joins the WRS GEMPA broadcast topic.
- * The backend must send FCM messages to topic "wrs-gempa-alerts"
- * for cloud push notifications to reach subscribed devices.
+ * Receives WRS GEMPA push messages. When a payload contains event parameters,
+ * tapping its notification opens that earthquake detail; warning-only pushes
+ * open the official tsunami dashboard instead.
  */
 class WrsFirebaseMessagingService : FirebaseMessagingService() {
     override fun onCreate() {
@@ -32,34 +36,95 @@ class WrsFirebaseMessagingService : FirebaseMessagingService() {
 
     override fun onMessageReceived(message: RemoteMessage) {
         super.onMessageReceived(message)
+        val data = message.data.toMutableMap()
+        // Some senders package event fields into one JSON-valued data key.
+        data["quake"]?.let { raw ->
+            runCatching {
+                val objectData = JSONObject(raw)
+                objectData.keys().forEach { key ->
+                    if (!data.containsKey(key)) data[key] = objectData.optString(key)
+                }
+            }
+        }
+
         val title = message.notification?.title
-            ?: message.data["title"]
+            ?: data["title"]
             ?: "Peringatan WRS GEMPA"
         val body = message.notification?.body
-            ?: message.data["body"]
-            ?: message.data["message"]
+            ?: data["body"]
+            ?: data["message"]
             ?: "Ada pembaruan informasi gempa. Buka WRS GEMPA untuk melihat detail."
-        showNotification(title, body)
+        showNotification(title, body, data)
     }
 
-    private fun showNotification(title: String, body: String) {
+    private fun showNotification(title: String, body: String, data: Map<String, String>) {
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            manager.createNotificationChannel(
-                NotificationChannel(CHANNEL_ID, "Peringatan WRS GEMPA", NotificationManager.IMPORTANCE_HIGH).apply {
-                    description = "Peringatan gempa dan tsunami dari WRS GEMPA"
-                }
-            )
+            if (manager.getNotificationChannel(QUAKE_CHANNEL_ID) == null) {
+                manager.createNotificationChannel(
+                    NotificationChannel(QUAKE_CHANNEL_ID, "Notifikasi Gempa", NotificationManager.IMPORTANCE_HIGH).apply {
+                        description = "Pembaruan gempa dari WRS GEMPA"
+                        enableVibration(true)
+                        vibrationPattern = longArrayOf(0, 250, 120, 250)
+                    }
+                )
+            }
+            if (manager.getNotificationChannel(TSUNAMI_CHANNEL_ID) == null) {
+                manager.createNotificationChannel(
+                    NotificationChannel(TSUNAMI_CHANNEL_ID, "Peringatan Tsunami", NotificationManager.IMPORTANCE_HIGH).apply {
+                        description = "Peringatan tsunami. Ikuti instruksi resmi BMKG/InaTEWS."
+                        enableVibration(true)
+                        vibrationPattern = longArrayOf(0, 500, 200, 500, 200, 900)
+                        setSound(
+                            RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM),
+                            AudioAttributes.Builder()
+                                .setUsage(AudioAttributes.USAGE_ALARM)
+                                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                                .build()
+                        )
+                    }
+                )
+            }
         }
+
+        val category = first(data, "category", "type").lowercase(Locale.ROOT)
+        val tsunamiAlert = category.contains("tsunami") ||
+            title.lowercase(Locale.ROOT).contains("tsunami") ||
+            body.lowercase(Locale.ROOT).contains("peringatan dini tsunami") ||
+            body.lowercase(Locale.ROOT).contains("warning tsunami")
+        val channelId = if (tsunamiAlert) TSUNAMI_CHANNEL_ID else QUAKE_CHANNEL_ID
+        val eventId = first(data, "quake_id", "event_id", "eventId", "eventid", "key", "id", "fingerprint")
         val openApp = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            if (eventId.isNotBlank()) putExtra("quake_id", eventId)
+            copyExtra(this, data, "quake_time", "time", "DateTime", "datetime", "timestamp")
+            copyExtra(this, data, "quake_magnitude", "magnitude", "Magnitude", "mag")
+            copyExtra(this, data, "quake_place", "place", "location", "Wilayah", "wilayah")
+            copyExtra(this, data, "quake_latitude", "lat", "latitude")
+            copyExtra(this, data, "quake_longitude", "lon", "longitude")
+            copyExtra(this, data, "quake_depth", "depth", "Kedalaman")
+            copyExtra(this, data, "quake_potential", "potential", "Potensi", "headline")
+            copyExtra(this, data, "quake_felt", "felt", "Dirasakan")
+            copyExtra(this, data, "quake_shakemap", "shakemap", "Shakemap")
+            copyExtra(this, data, "quake_source", "source", "status")
+
+            val category = first(data, "category", "type").lowercase(Locale.ROOT)
+            val tsunamiAlert = category.contains("tsunami") ||
+                title.lowercase(Locale.ROOT).contains("tsunami") ||
+                body.lowercase(Locale.ROOT).contains("peringatan tsunami")
+            if (tsunamiAlert && eventId.isBlank()) putExtra("open_tsunami_dashboard", true)
         }
+
+        val notificationKey = channelId + "|" + if (eventId.isNotBlank()) eventId else System.currentTimeMillis().toString()
+        val notificationId = notificationKey.hashCode().let { if (it == 0) 7301 else it }
         val pendingIntent = PendingIntent.getActivity(
-            this, 7301, openApp,
+            this,
+            notificationId,
+            openApp,
             PendingIntent.FLAG_UPDATE_CURRENT or
                 (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
         )
-        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+        val notification = NotificationCompat.Builder(this, channelId)
             .setSmallIcon(android.R.drawable.ic_dialog_alert)
             .setContentTitle(title)
             .setContentText(body)
@@ -69,14 +134,22 @@ class WrsFirebaseMessagingService : FirebaseMessagingService() {
             .setContentIntent(pendingIntent)
             .build()
         try {
-            NotificationManagerCompat.from(this).notify((System.currentTimeMillis() % Int.MAX_VALUE).toInt(), notification)
+            NotificationManagerCompat.from(this).notify(notificationId, notification)
         } catch (_: SecurityException) {
             // Android 13+: notification permission has not been granted.
         }
     }
 
+    private fun first(data: Map<String, String>, vararg keys: String): String =
+        keys.firstNotNullOfOrNull { key -> data[key]?.takeIf { it.isNotBlank() } }.orEmpty()
+
+    private fun copyExtra(intent: Intent, data: Map<String, String>, target: String, vararg keys: String) {
+        first(data, *keys).takeIf { it.isNotBlank() }?.let { intent.putExtra(target, it) }
+    }
+
     companion object {
         private const val TOPIC = "wrs-gempa-alerts"
-        private const val CHANNEL_ID = "wrs_gempa_fcm"
+        private const val QUAKE_CHANNEL_ID = "wrs_gempa_fcm_v2"
+        private const val TSUNAMI_CHANNEL_ID = "wrs_tsunami_fcm_v2"
     }
 }

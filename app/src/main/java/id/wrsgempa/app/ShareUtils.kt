@@ -85,15 +85,25 @@ object ShareUtils {
         field("Lokasi", quake.location)
         field("Koordinat", quake.coordinates)
         field("Kedalaman", quake.depth)
-        field("Sumber", "BMKG")
+        field("Sumber", quake.source)
         if (quake.felt.isNotBlank()) field("Dirasakan", quake.felt)
-        field("Potensi", quake.tsunami)
+        val tsunamiText = quake.tsunami.trim().ifBlank { "Status tidak tersedia; periksa BMKG/InaTEWS." }
+        field("Potensi", tsunamiText)
 
-        paint.color = if (quake.tsunami.lowercase(Locale.US).contains("berpotensi tsunami")) 0xFFFFE4E6.toInt() else 0xFFEAF8F1.toInt()
+        val tsunamiLower = tsunamiText.lowercase(Locale.ROOT)
+        val negativeStatus = tsunamiLower.contains("tidak berpotensi tsunami") ||
+            tsunamiLower.contains("tidak ada peringatan") || tsunamiLower.contains("no tsunami")
+        val positiveStatus = !negativeStatus && (tsunamiLower.contains("berpotensi tsunami") ||
+            tsunamiLower.contains("warning tsunami") || tsunamiLower.contains("peringatan dini tsunami"))
+        paint.color = when {
+            positiveStatus -> 0xFFFFE4E6.toInt()
+            negativeStatus -> 0xFFEAF8F1.toInt()
+            else -> 0xFFFFF4CC.toInt()
+        }
         c.drawRoundRect(34f, y + 5f, 1046f, y + 170f, 22f, 22f, paint)
         y += 45f
         c.drawText("STATUS TSUNAMI", 60f, y, textPaint(22f, true))
-        y = drawWrapped(c, quake.tsunami, 60f, y + 38f, textPaint(24f, true), 940f, 6f) + 22f
+        y = drawWrapped(c, tsunamiText, 60f, y + 38f, textPaint(24f, true), 940f, 6f) + 22f
 
         if (quake.shakemap.isNotBlank()) {
             paint.color = 0xFFE7EDF5.toInt()
@@ -104,7 +114,7 @@ object ShareUtils {
 
         paint.color = 0xFF0A1730.toInt()
         c.drawRect(0f, height - 78f, width.toFloat(), height.toFloat(), paint)
-        c.drawText("WRS GEMPA  •  Sumber data resmi BMKG", 34f, height - 30f, textPaint(20f, true, 0xFFFFFFFF.toInt()))
+        c.drawText("WRS GEMPA  •  Sumber: " + quake.source, 34f, height - 30f, textPaint(20f, true, 0xFFFFFFFF.toInt()))
         return bitmap
     }
 

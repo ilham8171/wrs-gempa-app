@@ -56,8 +56,11 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -68,6 +71,24 @@ private val Muted = Color(0xFF66758A)
 private val Pale = Color(0xFFF3F6FB)
 private val TsunamiRed = Color(0xFFB91C1C)
 private val TsunamiYellow = Color(0xFFFFF4CC)
+
+private fun wibClockText(): String =
+    java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale("id", "ID"))
+        .apply { timeZone = java.util.TimeZone.getTimeZone("Asia/Jakarta") }
+        .format(java.util.Date())
+
+@Composable
+private fun LiveWibClock(fg: Color) {
+    var now by remember { mutableStateOf(wibClockText()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            now = wibClockText()
+            val remainder = System.currentTimeMillis() % 1000L
+            delay((1000L - remainder).coerceAtLeast(1L))
+        }
+    }
+    Text("$now WIB", color = fg, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
+}
 
 data class Quake(
     val date: String,
@@ -81,14 +102,28 @@ data class Quake(
     val tsunami: String,
     val felt: String = "",
     val shakemap: String = "",
-    val id: String = ""
+    val id: String = "",
+    val source: String = "WRS GEMPA",
+    val warningEnded: Boolean? = null,
+    val warningEventId: String? = null,
+    val warningUpdatedAt: String? = null
 ) {
     val magnitudeValue: Double get() = magnitude.replace(",", ".").toDoubleOrNull() ?: 0.0
 }
 
+private data class FeedResults(
+    val wrs: Result<JSONObject>,
+    val latest: Result<List<Quake>>,
+    val m5: Result<List<Quake>>,
+    val felt: Result<List<Quake>>
+)
+
 class MainActivity : ComponentActivity() {
+    private val incomingNotificationIntent = mutableStateOf<Intent?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        incomingNotificationIntent.value = intent.takeIf(::hasNotificationRoute)
         FirebaseMessaging.getInstance().subscribeToTopic("wrs-gempa-alerts")
         FirebaseMessaging.getInstance().token.addOnSuccessListener { token ->
             getSharedPreferences("wrs_alerts", Context.MODE_PRIVATE)
@@ -101,8 +136,24 @@ class MainActivity : ComponentActivity() {
         WorkManager.getInstance(applicationContext).enqueueUniquePeriodicWork(
             "wrs_gempa_alerts", ExistingPeriodicWorkPolicy.KEEP, request
         )
-        setContent { WrsGempaApp() }
+        setContent {
+            WrsGempaApp(
+                incomingIntent = incomingNotificationIntent.value,
+                onIncomingIntentHandled = { incomingNotificationIntent.value = null }
+            )
+        }
     }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        incomingNotificationIntent.value = intent.takeIf(::hasNotificationRoute)
+    }
+
+    private fun hasNotificationRoute(intent: Intent): Boolean =
+        intent.hasExtra("quake_id") ||
+            intent.hasExtra("quake_time") ||
+            intent.getBooleanExtra("open_tsunami_dashboard", false)
 }
 
 private suspend fun fetchWrsData(): JSONObject = withContext(Dispatchers.IO) {
@@ -119,64 +170,140 @@ private suspend fun fetchWrsData(): JSONObject = withContext(Dispatchers.IO) {
     } finally { connection.disconnect() }
 }
 
+private suspend fun fetchBmkgQuakes(fileName: String): List<Quake> = withContext(Dispatchers.IO) {
+    val url = URL("https://data.bmkg.go.id/DataMKG/TEWS/" + fileName + "?t=" + System.currentTimeMillis())
+    val connection = url.openConnection() as HttpURLConnection
+    connection.connectTimeout = 12000
+    connection.readTimeout = 15000
+    connection.setRequestProperty("User-Agent", "WRS-GEMPA-Android")
+    connection.setRequestProperty("Accept", "application/json")
+    connection.setRequestProperty("Cache-Control", "no-cache")
+    try {
+        if (connection.responseCode !in 200..299) error("BMKG HTTP " + connection.responseCode)
+        val root = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+        val value = root.optJSONObject("Infogempa")?.opt("gempa")
+        when (value) {
+            is JSONObject -> listOfNotNull(parseQuake(value))
+            is JSONArray -> (0 until value.length()).mapNotNull { i -> value.optJSONObject(i)?.let(::parseQuake) }
+            else -> emptyList()
+        }
+    } finally { connection.disconnect() }
+}
+
 private fun parseWrsQuake(obj: JSONObject): Quake? {
     val lat = obj.optDouble("lat", Double.NaN)
     val lon = obj.optDouble("lon", Double.NaN)
     val magnitude = obj.optDouble("magnitude", Double.NaN)
-    if (!magnitude.isFinite()) return null
-    val rawTime = obj.optString("time", "")
-    val dateObj = try { java.util.Date.from(java.time.Instant.parse(rawTime)) } catch (_: Exception) {
-        try { java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).parse(rawTime.replace("T", " ").take(19)) } catch (_: Exception) { java.util.Date() }
-    }
+    if (!magnitude.isFinite() || magnitude <= 0.0 || magnitude > 10.0 ||
+        !lat.isFinite() || !lon.isFinite() ||
+        lat !in -90.0..90.0 || lon !in -180.0..180.0) return null
+
+    val place = obj.optString("place", "").trim()
+    if (place.isBlank()) return null
+    val rawTime = obj.optString("time", "").trim()
+    if (rawTime.isBlank()) return null
+    val dateObj = runCatching { java.util.Date.from(java.time.Instant.parse(rawTime)) }.getOrNull()
+        ?: runCatching { java.util.Date.from(java.time.OffsetDateTime.parse(rawTime).toInstant()) }.getOrNull()
+        ?: runCatching {
+            java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).apply {
+                isLenient = false
+                timeZone = java.util.TimeZone.getTimeZone("UTC")
+            }.parse(rawTime.replace("T", " ").take(19))
+        }.getOrNull()
+        ?: return null
+
     val dateFmt = java.text.SimpleDateFormat("dd MMM yyyy", java.util.Locale("id", "ID")).apply { timeZone = java.util.TimeZone.getTimeZone("Asia/Jakarta") }
     val timeFmt = java.text.SimpleDateFormat("HH:mm:ss 'WIB'", java.util.Locale("id", "ID")).apply { timeZone = java.util.TimeZone.getTimeZone("Asia/Jakarta") }
-    val latText = if (lat.isFinite()) String.format(java.util.Locale.US, "%.3f", lat) else "—"
-    val lonText = if (lon.isFinite()) String.format(java.util.Locale.US, "%.3f", lon) else "—"
-    val rawDepth = obj.optString("depth", "—")
-    return Quake(dateFmt.format(dateObj), timeFmt.format(dateObj), String.format(java.util.Locale.US, "%.1f", magnitude), rawDepth + if (rawDepth.isNotBlank() && rawDepth != "—" && !rawDepth.contains("km", true)) " km" else "", obj.optString("place", "Indonesia"), if (lat.isFinite() && lon.isFinite()) "$latText, $lonText" else "Koordinat tidak tersedia", if (lat.isFinite()) lat else -2.5, if (lon.isFinite()) lon else 118.0, obj.optString("potential", "—"), obj.optString("felt", ""), obj.optString("shakemap", ""), obj.optString("key", rawTime + "|" + magnitude + "|" + lat + "|" + lon))
+    val latText = String.format(java.util.Locale.US, "%.3f", lat)
+    val lonText = String.format(java.util.Locale.US, "%.3f", lon)
+    val rawDepth = obj.optString("depth", "—").trim()
+    val depth = when {
+        rawDepth.isBlank() || rawDepth == "—" -> "—"
+        rawDepth.contains("km", true) -> rawDepth
+        else -> "$rawDepth km"
+    }
+    return Quake(dateFmt.format(dateObj), timeFmt.format(dateObj), String.format(java.util.Locale.US, "%.1f", magnitude), depth,
+        place, "$latText, $lonText", lat, lon,
+        obj.optString("potential", "—"), obj.optString("felt", ""), obj.optString("shakemap", ""),
+        obj.optString("key", rawTime + "|" + magnitude + "|" + lat + "|" + lon),
+        obj.optString("source", "WRS GEMPA").ifBlank { "WRS GEMPA" },
+        if (obj.has("warningEnded") && !obj.isNull("warningEnded")) obj.optBoolean("warningEnded") else null,
+        obj.optString("warningEventId").takeIf { it.isNotBlank() },
+        obj.optString("warningUpdatedAt").takeIf { it.isNotBlank() })
 }
-private fun parseCoordinate(raw: String, isLatitude: Boolean): Double? {
-    val cleaned = raw.replace(" LS", "").replace(" LU", "").replace(" BT", "").replace(" BB", "").replace(",", ".")
+private fun parseCoordinate(raw: String): Double? {
+    val cleaned = raw.trim()
+        .replace(" LS", "", ignoreCase = true)
+        .replace(" LU", "", ignoreCase = true)
+        .replace(" BT", "", ignoreCase = true)
+        .replace(" BB", "", ignoreCase = true)
+        .replace(",", ".")
         .filter { it.isDigit() || it == '.' || it == '-' }
         .toDoubleOrNull() ?: return null
     return when {
-        raw.contains("LS") || raw.contains("BB") -> -kotlin.math.abs(cleaned)
-        isLatitude -> kotlin.math.abs(cleaned)
-        else -> kotlin.math.abs(cleaned)
+        raw.contains("LS", true) || raw.contains("BB", true) -> -kotlin.math.abs(cleaned)
+        raw.contains("LU", true) || raw.contains("BT", true) -> kotlin.math.abs(cleaned)
+        else -> cleaned
     }
 }
 
-private fun parseQuake(obj: JSONObject): Quake {
-    val coord = obj.optString("Coordinates", "")
+private fun parseQuake(obj: JSONObject): Quake? {
+    val magnitudeText = obj.optString("Magnitude", "").replace(",", ".").trim()
+    val magnitude = magnitudeText.toDoubleOrNull() ?: return null
+    val coord = obj.optString("Coordinates", "").trim()
     val coordParts = coord.split(",")
-    val lat = parseCoordinate(obj.optString("Lintang"), true) ?: coordParts.getOrNull(0)?.trim()?.toDoubleOrNull() ?: -2.5
-    val lon = parseCoordinate(obj.optString("Bujur"), false) ?: coordParts.getOrNull(1)?.trim()?.toDoubleOrNull() ?: 118.0
+    val lat = parseCoordinate(obj.optString("Lintang", "")) ?: coordParts.getOrNull(0)?.let(::parseCoordinate)
+        ?: return null
+    val lon = parseCoordinate(obj.optString("Bujur", "")) ?: coordParts.getOrNull(1)?.let(::parseCoordinate)
+        ?: return null
+    if (!magnitude.isFinite() || magnitude !in 0.0..10.0 ||
+        !lat.isFinite() || lat !in -90.0..90.0 ||
+        !lon.isFinite() || lon !in -180.0..180.0) return null
+
+    val date = obj.optString("Tanggal", "").trim()
+    val time = obj.optString("Jam", "").trim()
+    val location = obj.optString("Wilayah", "").trim()
+    if (date.isBlank() || time.isBlank() || location.isBlank()) return null
+
+    val rawDepth = obj.optString("Kedalaman", "—").trim()
+    val depth = when {
+        rawDepth.isBlank() -> "—"
+        rawDepth.contains("km", true) -> rawDepth
+        else -> "$rawDepth km"
+    }
+    val displayCoordinates = coord.ifBlank { "%.3f, %.3f".format(java.util.Locale.US, lat, lon) }
     return Quake(
-        date = obj.optString("Tanggal", "Tanggal tidak tersedia"),
-        time = obj.optString("Jam", ""),
-        magnitude = obj.optString("Magnitude", "—"),
-        depth = obj.optString("Kedalaman", "—"),
-        location = obj.optString("Wilayah", "Lokasi tidak tersedia"),
-        coordinates = coord.ifBlank { lat.toString() + "," + lon },
+        date = date,
+        time = time,
+        magnitude = String.format(java.util.Locale.US, "%.1f", magnitude),
+        depth = depth,
+        location = location,
+        coordinates = displayCoordinates,
         latitude = lat,
         longitude = lon,
         tsunami = obj.optString("Potensi", ""),
         felt = obj.optString("Dirasakan", ""),
         shakemap = obj.optString("Shakemap", ""),
-        id = obj.optString("ID", obj.optString("DateTime", ""))
+        id = obj.optString("ID", obj.optString("DateTime", "")),
+        source = "BMKG"
     )
 }
 
 private fun quakeArray(root: JSONObject): List<Quake> {
     val value = root.optJSONObject("Infogempa")?.opt("gempa") ?: return emptyList()
     return when (value) {
-        is JSONObject -> listOf(parseQuake(value))
+        is JSONObject -> listOfNotNull(parseQuake(value))
         is JSONArray -> (0 until value.length()).mapNotNull { value.optJSONObject(it)?.let(::parseQuake) }
         else -> emptyList()
     }
 }
 
-private fun quakeKey(q: Quake): String = listOf(q.date, q.time, q.magnitude, q.location, q.coordinates).joinToString("|")
+private fun quakeKey(q: Quake): String = if (q.warningEventId != null) {
+    listOf("InaTEWS", q.warningEventId, q.warningUpdatedAt.orEmpty().ifBlank { q.date + " " + q.time })
+        .joinToString("|")
+} else {
+    listOf(q.date, q.time, q.magnitude, q.location, q.coordinates).joinToString("|")
+}
 
 private fun quakeJson(q: Quake): JSONObject = JSONObject().apply {
     put("date", q.date)
@@ -191,22 +318,66 @@ private fun quakeJson(q: Quake): JSONObject = JSONObject().apply {
     put("felt", q.felt)
     put("shakemap", q.shakemap)
     put("id", q.id)
+    put("source", q.source)
+    q.warningEnded?.let { put("warningEnded", it) }
+    q.warningEventId?.let { put("warningEventId", it) }
+    q.warningUpdatedAt?.let { put("warningUpdatedAt", it) }
 }
 
-private fun quakeFromJson(obj: JSONObject): Quake = Quake(
-    date = obj.optString("date"),
-    time = obj.optString("time"),
-    magnitude = obj.optString("magnitude"),
-    depth = obj.optString("depth"),
-    location = obj.optString("location"),
-    coordinates = obj.optString("coordinates"),
-    latitude = obj.optDouble("latitude", -2.5),
-    longitude = obj.optDouble("longitude", 118.0),
-    tsunami = obj.optString("tsunami"),
-    felt = obj.optString("felt"),
-    shakemap = obj.optString("shakemap"),
-    id = obj.optString("id")
-)
+private fun quakeFromNotificationIntent(intent: Intent): Quake? {
+    val rawTime = intent.getStringExtra("quake_time").orEmpty()
+    val magnitude = intent.getStringExtra("quake_magnitude").orEmpty().replace(",", ".").toDoubleOrNull() ?: return null
+    val latitude = intent.getStringExtra("quake_latitude")?.toDoubleOrNull() ?: return null
+    val longitude = intent.getStringExtra("quake_longitude")?.toDoubleOrNull() ?: return null
+    val place = intent.getStringExtra("quake_place").orEmpty()
+    if (rawTime.isBlank() || place.isBlank()) return null
+    val payload = JSONObject().apply {
+        put("key", intent.getStringExtra("quake_id").orEmpty().ifBlank { rawTime + "|" + magnitude + "|" + latitude + "|" + longitude })
+        put("time", rawTime)
+        put("magnitude", magnitude)
+        put("lat", latitude)
+        put("lon", longitude)
+        put("place", place)
+        put("depth", intent.getStringExtra("quake_depth").orEmpty().ifBlank { "—" })
+        put("potential", intent.getStringExtra("quake_potential").orEmpty().ifBlank { "Status tsunami: periksa BMKG/InaTEWS" })
+        put("felt", intent.getStringExtra("quake_felt").orEmpty())
+        put("shakemap", intent.getStringExtra("quake_shakemap").orEmpty())
+        put("source", intent.getStringExtra("quake_source").orEmpty().ifBlank { "WRS GEMPA" })
+    }
+    return parseWrsQuake(payload)
+}
+
+private fun quakeFromJson(obj: JSONObject): Quake? {
+    val latitude = obj.optDouble("latitude", Double.NaN)
+    val longitude = obj.optDouble("longitude", Double.NaN)
+    val magnitude = obj.optString("magnitude", "").replace(",", ".").toDoubleOrNull() ?: return null
+    val date = obj.optString("date", "").trim()
+    val time = obj.optString("time", "").trim()
+    val location = obj.optString("location", "").trim()
+    if (!latitude.isFinite() || latitude !in -90.0..90.0 ||
+        !longitude.isFinite() || longitude !in -180.0..180.0 ||
+        !magnitude.isFinite() || magnitude <= 0.0 || magnitude > 10.0 ||
+        date.isBlank() || time.isBlank() || location.isBlank()) return null
+
+    return Quake(
+        date = date,
+        time = time,
+        magnitude = String.format(java.util.Locale.US, "%.1f", magnitude),
+        depth = obj.optString("depth", "—"),
+        location = location,
+        coordinates = obj.optString("coordinates").ifBlank { "%.3f, %.3f".format(java.util.Locale.US, latitude, longitude) },
+        latitude = latitude,
+        longitude = longitude,
+        tsunami = obj.optString("tsunami"),
+        felt = obj.optString("felt"),
+        shakemap = obj.optString("shakemap"),
+        id = obj.optString("id"),
+        source = obj.optString("source", "WRS GEMPA").ifBlank { "WRS GEMPA" },
+        warningEnded = if (obj.has("warningEnded") && !obj.isNull("warningEnded")) obj.optBoolean("warningEnded") else null,
+        warningEventId = obj.optString("warningEventId").takeIf { it.isNotBlank() },
+        warningUpdatedAt = obj.optString("warningUpdatedAt").takeIf { it.isNotBlank() }
+    )
+}
 
 private fun loadHistory(prefs: android.content.SharedPreferences): List<Quake> {
     return try {
@@ -224,18 +395,41 @@ private fun saveHistory(prefs: android.content.SharedPreferences, items: List<Qu
 }
 
 private fun isTsunamiPotential(q: Quake): Boolean {
-    val s = q.tsunami.lowercase()
-    return (s.contains("berpotensi tsunami") && !s.contains("tidak berpotensi tsunami")) || s.contains("warning tsunami") || s.contains("peringatan dini tsunami")
+    val s = q.tsunami.lowercase(java.util.Locale.ROOT)
+    val explicitlyNegative = s.contains("tidak berpotensi tsunami") ||
+        s.contains("tidak ada peringatan") || s.contains("no tsunami")
+    if (explicitlyNegative) return false
+    return (s.contains("berpotensi tsunami") || s.contains("warning tsunami") ||
+        s.contains("peringatan dini tsunami"))
 }
+
+private fun latestTsunamiBulletins(items: List<Quake>): List<Quake> =
+    items.filter { it.warningEventId != null }
+        .groupBy { it.warningEventId?.takeIf(String::isNotBlank) ?: it.id.ifBlank { quakeKey(it) } }
+        .values
+        .mapNotNull { bulletins ->
+            // timesent is an ISO timestamp from the CAP feed and sorts chronologically.
+            // Fall back to event time only for older cached records without issue time.
+            bulletins.maxByOrNull { it.warningUpdatedAt?.takeIf { stamp -> stamp.isNotBlank() } ?: (it.date + " " + it.time) }
+        }
 
 private fun tsunamiStatus(q: Quake?): Pair<String, Color> {
     if (q == null) return "BELUM ADA DATA" to Muted
-    return if (isTsunamiPotential(q)) "POTENSI TSUNAMI" to TsunamiRed else "TIDAK ADA POTENSI TSUNAMI" to Color(0xFF147A51)
+    val sourceText = q.tsunami.trim()
+    if (sourceText.isBlank() || sourceText == "—") return "STATUS TIDAK TERSEDIA" to Muted
+    if (isTsunamiPotential(q)) return "POTENSI TSUNAMI" to TsunamiRed
+    if (sourceText.lowercase(java.util.Locale.ROOT).contains("tidak berpotensi tsunami")) {
+        return "TIDAK BERPOTENSI" to Color(0xFF147A51)
+    }
+    return "PERIKSA INaTEWS" to Muted
 }
 
 @OptIn(ExperimentalMaterialApi::class)
 @Composable
-private fun WrsGempaApp() {
+private fun WrsGempaApp(
+    incomingIntent: Intent? = null,
+    onIncomingIntentHandled: () -> Unit = {}
+) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("wrs_alerts", Context.MODE_PRIVATE) }
     var dark by remember { mutableStateOf(false) }
@@ -244,12 +438,14 @@ private fun WrsGempaApp() {
     var latest by remember { mutableStateOf<Quake?>(null) }
     var quakes by remember { mutableStateOf<List<Quake>>(emptyList()) }
     var feltQuakes by remember { mutableStateOf<List<Quake>>(emptyList()) }
+    var m5Quakes by remember { mutableStateOf<List<Quake>>(emptyList()) }
     var history by remember { mutableStateOf(loadHistory(prefs)) }
     var selected by remember { mutableStateOf<Quake?>(null) }
     var loading by remember { mutableStateOf(false) }
+    var refreshCompleted by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     var lastUpdated by remember { mutableStateOf("Belum diperbarui") }
-    var filter by remember { mutableStateOf("Terbaru") }
+    var filter by remember { mutableStateOf("Realtime") }
     var bigAlerts by remember { mutableStateOf(prefs.getBoolean("big_alerts", true)) }
     var feltAlerts by remember { mutableStateOf(prefs.getBoolean("felt_alerts", true)) }
     var tsunamiAlerts by remember { mutableStateOf(prefs.getBoolean("tsunami_alerts", true)) }
@@ -257,49 +453,166 @@ private fun WrsGempaApp() {
     var minMagnitude by remember { mutableStateOf(prefs.getString("min_magnitude", "4.0") ?: "4.0") }
     var radius by remember { mutableStateOf(prefs.getString("radius", "200 km") ?: "200 km") }
 
-    suspend fun refresh() {
-        loading = true
-        error = ""
+    LaunchedEffect(incomingIntent, latest, quakes, feltQuakes, m5Quakes, history, loading, refreshCompleted) {
+        val pending = incomingIntent ?: return@LaunchedEffect
+        val eventId = pending.getStringExtra("quake_id").orEmpty()
+        val wantsTsunami = pending.getBooleanExtra("open_tsunami_dashboard", false)
+        val payloadHasValidEvent = !pending.getStringExtra("quake_time").isNullOrBlank() &&
+            !pending.getStringExtra("quake_place").isNullOrBlank() &&
+            pending.getStringExtra("quake_magnitude")?.replace(",", ".")?.toDoubleOrNull() != null &&
+            (pending.getStringExtra("quake_latitude")?.toDoubleOrNull()?.let { it in -90.0..90.0 } == true) &&
+            (pending.getStringExtra("quake_longitude")?.toDoubleOrNull()?.let { it in -180.0..180.0 } == true)
+        if (wantsTsunami && !payloadHasValidEvent) {
+            selected = null
+            tab = 4
+            subPage = 6
+            onIncomingIntentHandled()
+        } else if (eventId.isNotBlank() || pending.hasExtra("quake_time")) {
+            val candidates = (listOfNotNull(latest) + quakes + feltQuakes + m5Quakes + history).distinctBy(::quakeKey)
+            val target = candidates.firstOrNull { q ->
+                (eventId.isNotBlank() && (q.id == eventId || quakeKey(q) == eventId)) ||
+                    (pending.getStringExtra("quake_time").orEmpty().isNotBlank() &&
+                        q.id == pending.getStringExtra("quake_time")) ||
+                    (pending.getStringExtra("quake_place").orEmpty().isNotBlank() &&
+                        q.location.equals(pending.getStringExtra("quake_place"), ignoreCase = true) &&
+                        q.magnitude == pending.getStringExtra("quake_magnitude") &&
+                        q.time == pending.getStringExtra("quake_time"))
+            }
+            val fromPayload = target ?: quakeFromNotificationIntent(pending)
+            if (fromPayload != null) {
+                selected = fromPayload
+                subPage = -1
+                onIncomingIntentHandled()
+            } else if (refreshCompleted) {
+                // Event-only payloads may refer to records not retained in the local cache.
+                // Never leave a notification tap hanging on an unhandled intent.
+                if (wantsTsunami) {
+                    selected = null
+                    tab = 4
+                    subPage = 6
+                } else {
+                    selected = null
+                    tab = 2
+                    subPage = -1
+                }
+                onIncomingIntentHandled()
+            }
+        }
+    }
+
+
+    val refreshMutex = remember { Mutex() }
+
+    suspend fun refresh(showProgress: Boolean = false) {
+        if (!refreshMutex.tryLock()) return
+        if (showProgress) {
+            loading = true
+            error = ""
+        }
         try {
-            val wrs = fetchWrsData()
+            // Fetch official and backend sources in parallel. Netlify outages must not block BMKG.
+            val feeds = coroutineScope {
+                val wrsTask = async { runCatching { fetchWrsData() } }
+                val latestTask = async { runCatching { fetchBmkgQuakes("autogempa.json") } }
+                val m5Task = async { runCatching { fetchBmkgQuakes("gempaterkini.json") } }
+                val feltTask = async { runCatching { fetchBmkgQuakes("gempadirasakan.json") } }
+                FeedResults(wrsTask.await(), latestTask.await(), m5Task.await(), feltTask.await())
+            }
+            if (!feeds.wrs.isSuccess && !feeds.latest.isSuccess && !feeds.m5.isSuccess && !feeds.felt.isSuccess) {
+                // Retain last good content; only show the error when there is nothing cached.
+                if (latest == null && quakes.isEmpty()) {
+                    error = "Data belum tersedia. Periksa koneksi internet lalu coba perbarui."
+                }
+                return
+            }
+
+            val wrs = feeds.wrs.getOrNull() ?: JSONObject()
             val recentJson = wrs.optJSONArray("recent") ?: JSONArray()
-            val parsedRecent = (0 until recentJson.length()).mapNotNull { i -> recentJson.optJSONObject(i)?.let(::parseWrsQuake) }
+            val parsedRecent = (0 until recentJson.length()).mapNotNull { i ->
+                recentJson.optJSONObject(i)?.let(::parseWrsQuake)
+            }
+
+            val bmkgLatest = feeds.latest.getOrDefault(emptyList())
+            val bmkgM5 = feeds.m5.getOrDefault(emptyList())
+            val bmkgFelt = feeds.felt.getOrDefault(emptyList())
             val preferredLatest = (wrs.optJSONObject("official") ?: wrs.optJSONObject("latest"))?.let(::parseWrsQuake)
-            latest = preferredLatest ?: parsedRecent.firstOrNull()
-            quakes = parsedRecent.distinctBy(::quakeKey)
-            feltQuakes = parsedRecent.filter { it.felt.isNotBlank() }
+
+            val newLatest = bmkgLatest.firstOrNull() ?: preferredLatest ?: parsedRecent.firstOrNull() ?: latest
+            val fetchedQuakes = (parsedRecent + bmkgLatest).distinctBy(::quakeKey)
+            // Keep the last good category cache if an upstream feed is temporarily unavailable
+            // or returns an unusable empty result; never blank a working screen during polling.
+            val newQuakes = fetchedQuakes.ifEmpty { quakes }
+            val newM5 = if (feeds.m5.isSuccess && bmkgM5.isNotEmpty()) {
+                bmkgM5.filter { it.magnitudeValue >= 5.0 }.distinctBy(::quakeKey)
+            } else {
+                m5Quakes
+            }
+            val freshFelt = (bmkgFelt + parsedRecent.filter { it.felt.isNotBlank() }).distinctBy(::quakeKey)
+            val newFelt = if (feeds.felt.isSuccess && freshFelt.isNotEmpty()) freshFelt else feltQuakes
+
             val tsunamiJson = wrs.optJSONArray("tsunamiHistory") ?: JSONArray()
             val tsunamiItems = (0 until tsunamiJson.length()).mapNotNull { i ->
                 val item = tsunamiJson.optJSONObject(i) ?: return@mapNotNull null
+                val latitude = item.optDouble("lat", Double.NaN)
+                val longitude = item.optDouble("lon", Double.NaN)
+                val magnitude = item.optDouble("magnitude", Double.NaN)
+                val eventTime = item.optString("time", item.optString("timesent", "")).trim()
+
+                // Alert-only records without valid quake parameters belong to the tsunami dashboard,
+                // not the earthquake archive (avoids phantom M0 entries or invented coordinates).
+                if (!latitude.isFinite() || !longitude.isFinite() || !magnitude.isFinite() ||
+                    magnitude <= 0.0 || magnitude > 10.0 ||
+                    latitude !in -90.0..90.0 || longitude !in -180.0..180.0 || eventTime.isBlank()) {
+                    return@mapNotNull null
+                }
                 val normalized = JSONObject().apply {
                     put("key", item.optString("key", item.optString("eventid", "tsunami-" + i)))
-                    put("magnitude", item.optDouble("magnitude", 0.0))
-                    put("lat", item.optDouble("lat", Double.NaN))
-                    put("lon", item.optDouble("lon", Double.NaN))
+                    put("magnitude", magnitude)
+                    put("lat", latitude)
+                    put("lon", longitude)
                     put("place", item.optString("place", "Wilayah peringatan tsunami"))
                     put("depth", item.optString("depth", "—"))
-                    put("time", item.optString("time", item.optString("timesent", "")))
+                    put("time", eventTime)
                     put("potential", item.optString("headline", item.optString("subject", item.optString("potential", "Peringatan tsunami InaTEWS"))))
+                    put("source", "InaTEWS")
+                    put("warningEnded", item.optBoolean("ended", false))
+                    put("warningEventId", item.optString("eventid").ifBlank { item.optString("key", "tsunami-" + i) })
+                    put("warningUpdatedAt", item.optString("timesent"))
                     put("felt", item.optString("description", item.optString("instruction", "")))
                     put("shakemap", item.optString("shakemap", ""))
                 }
                 parseWrsQuake(normalized)
             }
-            history = (listOfNotNull(latest) + quakes + feltQuakes + tsunamiItems + history).distinctBy(::quakeKey).take(250)
+
+            latest = newLatest
+            quakes = newQuakes
+            m5Quakes = newM5
+            feltQuakes = newFelt
+            history = (tsunamiItems + listOfNotNull(newLatest) + newM5 + newFelt + newQuakes + history).distinctBy(::quakeKey).take(250)
             saveHistory(prefs, history)
-            lastUpdated = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
+            lastUpdated = wibClockText()
+            error = if (newLatest == null && newQuakes.isEmpty()) {
+                "Feed berhasil dihubungi, tetapi belum ada data gempa yang valid."
+            } else {
+                ""
+            }
         } catch (_: Exception) {
-            error = "Data WRS GEMPA belum dapat dimuat. Periksa koneksi dan endpoint Netlify."
+            // A temporary network or parsing issue must never clear the last successful content.
+            if (latest == null && quakes.isEmpty()) {
+                error = "Data belum tersedia. Periksa koneksi internet lalu coba perbarui."
+            }
         } finally {
-            loading = false
+            refreshCompleted = true
+            if (showProgress) loading = false
+            refreshMutex.unlock()
         }
     }
 
     LaunchedEffect(Unit) {
-        refresh()
+        refresh(showProgress = true)
         while (true) {
             delay(60_000L)
-            refresh()
+            refresh(showProgress = false)
         }
     }
 
@@ -308,7 +621,7 @@ private fun WrsGempaApp() {
     val card = if (dark) Color(0xFF13233A) else Color.White
 
     val scope = rememberCoroutineScope()
-    val refreshAction: () -> Unit = { scope.launch { refresh() } }
+    val refreshAction: () -> Unit = { scope.launch { refresh(showProgress = true) } }
     val pullState = rememberPullRefreshState(loading, refreshAction)
 
     MaterialTheme(
@@ -336,14 +649,14 @@ private fun WrsGempaApp() {
                 when {
                     selected != null -> DetailPage(selected!!, fg, card, { selected = null }, padding)
                     subPage == 5 -> NearbyPage(quakes + listOfNotNull(latest), fg, card, padding, { selected = it })
-                    subPage == 6 -> TsunamiPage(latest, history.filter(::isTsunamiPotential), fg, card, padding)
+                    subPage == 6 -> TsunamiPage(latest, history.filter { it.warningEventId != null }, fg, card, padding)
                     subPage == 7 -> InfoPage(fg, card, padding)
                     subPage == 8 -> HistoryPage(history, fg, card, padding, { selected = it })
                     subPage == 9 -> ShakeMapsPage(history.filter { it.shakemap.isNotBlank() }, fg, card, padding, { selected = it })
                     else -> when (tab) {
-                        0 -> HomePage(latest, quakes, feltQuakes, loading, error, lastUpdated, fg, card, dark, { dark = !dark }, { refreshAction() }, { selected = it }, { tab = 1 }, { subPage = 6 }, padding)
+                        0 -> HomePage(latest, quakes, feltQuakes, m5Quakes.size, loading, error, lastUpdated, fg, card, dark, { dark = !dark }, { refreshAction() }, { selected = it }, { tab = 1 }, { subPage = 6 }, padding)
                         1 -> MapPage(lastUpdated, fg, padding, { subPage = 8 }, { subPage = 9 })
-                        2 -> QuakeListPage(quakes, feltQuakes, filter, { filter = it }, fg, card, padding, { selected = it })
+                        2 -> QuakeListPage(quakes, feltQuakes, m5Quakes, history.filter(::isTsunamiPotential), filter, { filter = it }, fg, card, padding, { selected = it })
                         3 -> NotificationPage(latest, quakes, bigAlerts, { bigAlerts = it; prefs.edit().putBoolean("big_alerts", it).apply() }, feltAlerts, { feltAlerts = it; prefs.edit().putBoolean("felt_alerts", it).apply() }, tsunamiAlerts, { tsunamiAlerts = it; prefs.edit().putBoolean("tsunami_alerts", it).apply() }, nearbyAlerts, { nearbyAlerts = it; prefs.edit().putBoolean("nearby_alerts", it).apply() }, minMagnitude, { minMagnitude = it; prefs.edit().putString("min_magnitude", it).apply() }, radius, { radius = it; prefs.edit().putString("radius", it).apply() }, fg, card, padding, { selected = it })
                         else -> MorePage(fg, card, dark, { dark = !dark }, padding, { page -> subPage = page })
                     }
@@ -373,6 +686,7 @@ private fun HomePage(
     latest: Quake?,
     quakes: List<Quake>,
     feltQuakes: List<Quake>,
+    m5Count: Int,
     loading: Boolean,
     error: String,
     lastUpdated: String,
@@ -395,9 +709,16 @@ private fun HomePage(
             }
         }
         item {
-            Surface(color = Color(0xFFDDF7EA), shape = RoundedCornerShape(18.dp)) {
-                Text("● LIVE BMKG  •  Auto update 60 detik  •  Swipe-down untuk refresh", color = Color(0xFF11774A), fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Surface(color = Color(0xFFDDF7EA), shape = RoundedCornerShape(18.dp)) {
+                    Text("● LIVE BMKG", color = Color(0xFF11774A), fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp))
+                }
+                Column(Modifier.weight(1f)) {
+                    Text("JAM SEKARANG", color = fg.copy(alpha = .6f), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    LiveWibClock(fg)
+                }
             }
+            Text("Sinkronisasi data berjalan diam-diam setiap 60 detik. Halaman dan peta tidak dimuat ulang otomatis.", color = fg.copy(alpha = .62f), fontSize = 10.sp)
         }
         item {
             Card(colors = CardDefaults.cardColors(containerColor = Navy), shape = RoundedCornerShape(24.dp), modifier = Modifier.fillMaxWidth().clickable(enabled = latest != null) { latest?.let(open) }) {
@@ -440,7 +761,7 @@ private fun HomePage(
                 Card(colors = CardDefaults.cardColors(containerColor = TsunamiYellow), shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth().clickable { openTsunami() }) {
                     Column(Modifier.padding(16.dp)) {
                         Text("STATUS TSUNAMI", color = Color(0xFF6B4B00), fontWeight = FontWeight.Bold)
-                        Text(latest?.tsunami ?: "Menunggu data BMKG", color = Color(0xFF5E5131), fontSize = 13.sp)
+                        Text(latest?.tsunami?.takeIf { it.isNotBlank() && it != "—" } ?: "Status tsunami tidak tercantum pada data kejadian ini. Periksa InaTEWS.", color = Color(0xFF5E5131), fontSize = 13.sp)
                         Text("Buka dashboard InaTEWS →", color = Color(0xFF7A5A00), fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp))
                     }
                 }
@@ -448,7 +769,7 @@ private fun HomePage(
         }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                StatCard("M 5+", quakes.size.toString(), "Katalog BMKG", card, fg, Modifier.weight(1f))
+                StatCard("M 5+", m5Count.toString(), "15 kejadian BMKG", card, fg, Modifier.weight(1f))
                 StatCard("Dirasakan", feltQuakes.size.toString(), "Katalog BMKG", card, fg, Modifier.weight(1f))
                 StatCard("Update", lastUpdated, "WIB", card, fg, Modifier.weight(1f))
             }
@@ -465,8 +786,8 @@ private fun HomePage(
                     Box(Modifier.fillMaxWidth().height(125.dp).background(Navy, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Icon(Icons.Default.Map, null, tint = Color(0xFF72C6B2), modifier = Modifier.size(40.dp))
-                            Text("Peta realtime 200 kejadian InaTEWS", color = Color.White, fontWeight = FontWeight.SemiBold)
-                            Text("Episenter • magnitudo • kedalaman • aliran kejadian", color = Color(0xFFB9D4FF), fontSize = 10.sp)
+                            Text("Peta interaktif realtime", color = Color.White, fontWeight = FontWeight.SemiBold)
+                            Text("Ketuk untuk membuka monitoring WRS GEMPA", color = Color(0xFFB9D4FF), fontSize = 10.sp)
                         }
                     }
                 }
@@ -523,20 +844,20 @@ private fun QuakeRow(quake: Quake, card: Color, fg: Color, open: () -> Unit) {
 }
 
 @Composable
-private fun QuakeListPage(quakes: List<Quake>, felt: List<Quake>, filter: String, setFilter: (String) -> Unit, fg: Color, card: Color, padding: PaddingValues, open: (Quake) -> Unit) {
+private fun QuakeListPage(quakes: List<Quake>, felt: List<Quake>, m5: List<Quake>, tsunami: List<Quake>, filter: String, setFilter: (String) -> Unit, fg: Color, card: Color, padding: PaddingValues, open: (Quake) -> Unit) {
     Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 18.dp)) {
-        Header(fg, "Daftar Gempa", "M 5+, dirasakan, dan detail kejadian")
+        Header(fg, "Informasi Gempa", "Sumber sesuai kejadian • semua waktu WIB")
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            listOf("Terbaru", "M ≥ 5.0", "Dirasakan").forEach { item ->
+            listOf("Realtime", "Dirasakan", "M ≥ 5.0", "Tsunami").forEach { item ->
                 FilterChip(selected = filter == item, onClick = { setFilter(item) }, label = { Text(item, fontSize = 11.sp) })
             }
         }
         Spacer(Modifier.height(8.dp))
-        val source = if (filter == "Dirasakan") felt else quakes
-        val shown = if (filter == "M ≥ 5.0") source.filter { it.magnitudeValue >= 5.0 } else source
+        val source = when (filter) { "Dirasakan" -> felt; "Tsunami" -> tsunami; else -> quakes }
+        val shown = if (filter == "M ≥ 5.0") m5.filter { it.magnitudeValue >= 5.0 } else source
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
-            if (shown.isEmpty()) item { Text("Belum ada data. Tarik layar dari atas atau tunggu update otomatis.", color = Muted, modifier = Modifier.padding(20.dp)) }
+            if (shown.isEmpty()) item { Text("Belum ada data pada kategori ini. Pembaruan berjalan otomatis tanpa memuat ulang halaman.", color = Muted, modifier = Modifier.padding(20.dp)) }
             items(shown) { QuakeRow(it, card, fg) { open(it) } }
         }
     }
@@ -545,8 +866,6 @@ private fun QuakeListPage(quakes: List<Quake>, felt: List<Quake>, filter: String
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 private fun MapPage(lastUpdated: String, fg: Color, padding: PaddingValues, openHistory: () -> Unit, openShakemap: () -> Unit) {
-    var monitorWebView by remember { mutableStateOf<WebView?>(null) }
-    LaunchedEffect(lastUpdated) { monitorWebView?.reload() }
     Column(Modifier.fillMaxSize().padding(padding)) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
             Header(fg, "Monitoring Gempa Realtime", "Peta langsung dari WRS GEMPA milikmu")
@@ -555,7 +874,11 @@ private fun MapPage(lastUpdated: String, fg: Color, padding: PaddingValues, open
                     Text("LIVE • WRS GEMPA", color = Color(0xFF11774A), fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp))
                 }
                 Spacer(Modifier.width(8.dp))
-                Text("Auto refresh 60 detik • Update " + lastUpdated + " WIB", color = fg.copy(alpha = .68f), fontSize = 10.sp)
+                Column {
+                    Text("Jam sekarang", color = fg.copy(alpha = .6f), fontSize = 9.sp)
+                    LiveWibClock(fg)
+                    Text("Data terakhir: " + lastUpdated + " WIB", color = fg.copy(alpha = .68f), fontSize = 10.sp)
+                }
             }
         }
         Row(Modifier.padding(horizontal = 14.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -567,7 +890,6 @@ private fun MapPage(lastUpdated: String, fg: Color, padding: PaddingValues, open
             modifier = Modifier.weight(1f).fillMaxWidth(),
             factory = { ctx ->
                 WebView(ctx).apply {
-                    monitorWebView = this
                     webViewClient = WebViewClient()
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
@@ -586,7 +908,8 @@ private fun MapPage(lastUpdated: String, fg: Color, padding: PaddingValues, open
 private fun DetailPage(quake: Quake, fg: Color, card: Color, back: () -> Unit, padding: PaddingValues) {
     val context = LocalContext.current
     var toast by remember { mutableStateOf("") }
-    val status = if (isTsunamiPotential(quake)) "POTENSI TSUNAMI" else "TIDAK ADA POTENSI TSUNAMI"
+    val statusPair = tsunamiStatus(quake)
+    val status = statusPair.first
     LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -638,8 +961,8 @@ private fun DetailPage(quake: Quake, fg: Color, card: Color, back: () -> Unit, p
                     DetailLine("Magnitudo", "M " + quake.magnitude, fg)
                     DetailLine("Dirasakan", quake.felt.ifBlank { "Tidak ada data dirasakan" }, fg)
                     DetailLine("Potensi tsunami", quake.tsunami.ifBlank { "Tidak ada keterangan" }, fg)
-                    DetailLine("Sumber", "WRS GEMPA • BMKG / InaTEWS / USGS sesuai data kejadian", fg)
-                    Text(status, color = if (isTsunamiPotential(quake)) TsunamiRed else Color(0xFF147A51), fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(top = 8.dp))
+                    DetailLine("Sumber data", quake.source, fg)
+                    Text(status, color = statusPair.second, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(top = 8.dp))
                 }
             }
         }
@@ -806,7 +1129,7 @@ private fun MorePage(fg: Color, card: Color, dark: Boolean, toggleDark: () -> Un
         item {
             Card(colors = CardDefaults.cardColors(containerColor = card), shape = RoundedCornerShape(18.dp)) {
                 Column(Modifier.padding(16.dp)) {
-                    Text("WRS GEMPA 1.4.0", color = fg, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+                    Text("WRS GEMPA 1.6.0", color = fg, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
                     Spacer(Modifier.height(6.dp))
                     Text("Monitoring gempa bumi, potensi tsunami, riwayat, ShakeMap, notifikasi, dan berbagi gambar informasi.", color = fg.copy(alpha = .75f), fontSize = 13.sp)
                     Spacer(Modifier.height(6.dp))
@@ -837,7 +1160,7 @@ private fun HistoryPage(history: List<Quake>, fg: Color, card: Color, padding: P
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 FilterChip(selected = tab == 0, onClick = { tab = 0 }, label = { Text("Semua gempa") })
-                FilterChip(selected = tab == 1, onClick = { tab = 1 }, label = { Text("Riwayat tsunami") })
+                FilterChip(selected = tab == 1, onClick = { tab = 1 }, label = { Text("Potensi tsunami") })
             }
         }
         items(source) { QuakeRow(it, card, fg) { open(it) } }
@@ -865,18 +1188,28 @@ private fun ShakeMapsPage(items: List<Quake>, fg: Color, card: Color, padding: P
 private fun TsunamiPage(latest: Quake?, history: List<Quake>, fg: Color, card: Color, padding: PaddingValues) {
     val context = LocalContext.current
     var webView by remember { mutableStateOf<WebView?>(null) }
-    val statusPair = tsunamiStatus(latest)
+    val newestBulletins = latestTsunamiBulletins(history)
+    val activeBulletins = newestBulletins.filter { it.warningEnded == false }
+    val endedBulletins = newestBulletins.filter { it.warningEnded == true }
+    val statusPair = when {
+        activeBulletins.isNotEmpty() -> "PERINGATAN BELUM DINYATAKAN BERAKHIR" to TsunamiRed
+        history.isEmpty() -> "STATUS AKTIF BELUM TERVERIFIKASI" to Muted
+        else -> "BUKA INATEWS UNTUK STATUS TERKINI" to Muted
+    }
     val statusText = statusPair.first
-    val detail = if (latest != null) {
-        "Gempa: M " + latest.magnitude + " • " + latest.location + " • " + latest.depth + ". Status BMKG: " + latest.tsunami
-    } else {
-        "Belum ada parameter gempa terbaru dari BMKG."
+    val detail = when {
+        activeBulletins.isNotEmpty() ->
+            "${activeBulletins.size} buletin InaTEWS pada data tersimpan belum ditandai berakhir. Ini perlu segera diverifikasi pada halaman resmi; status dari arsip tidak selalu sama dengan status saat ini."
+        history.isEmpty() ->
+            "Belum ada buletin tsunami InaTEWS yang tersedia di arsip perangkat. Status peringatan aktif belum dapat dipastikan dari data gempa terbaru saja."
+        else ->
+            "${endedBulletins.size} buletin InaTEWS pada arsip ditandai berakhir. Hal ini bukan jaminan tidak ada peringatan baru; periksa halaman resmi untuk status terkini."
     }
     Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState())) {
         Column(Modifier.padding(18.dp)) {
             Header(fg, "Tsunami Dashboard", "Fokus peringatan dan dampak dari InaTEWS BMKG")
             Spacer(Modifier.height(12.dp))
-            Card(colors = CardDefaults.cardColors(containerColor = if (isTsunamiPotential(latest ?: Quake("", "", "0", "", "", "", 0.0, 0.0, ""))) Color(0xFFFFE8E8) else card), shape = RoundedCornerShape(22.dp)) {
+            Card(colors = CardDefaults.cardColors(containerColor = if (activeBulletins.isNotEmpty()) Color(0xFFFFE8E8) else card), shape = RoundedCornerShape(22.dp)) {
                 Column(Modifier.padding(18.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Warning, null, tint = statusPair.second, modifier = Modifier.size(38.dp))
@@ -904,6 +1237,18 @@ private fun TsunamiPage(latest: Quake?, history: List<Quake>, fg: Color, card: C
                     }
                 }
             }
+            if (latest != null) {
+                Spacer(Modifier.height(10.dp))
+                Card(colors = CardDefaults.cardColors(containerColor = card), shape = RoundedCornerShape(16.dp)) {
+                    Column(Modifier.padding(14.dp)) {
+                        Text("Gempa terbaru (bukan status peringatan aktif)", color = fg, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Spacer(Modifier.height(6.dp))
+                        DetailLine("Kejadian", "M ${latest.magnitude} • ${latest.location}", fg)
+                        DetailLine("Waktu", "${latest.date} • ${latest.time}", fg)
+                        DetailLine("Keterangan potensi pada kejadian", latest.tsunami.ifBlank { "Tidak tercantum; periksa InaTEWS." }, fg)
+                    }
+                }
+            }
             Spacer(Modifier.height(12.dp))
             Text("Peta resmi InaTEWS", color = fg, fontWeight = FontWeight.Bold, fontSize = 17.sp)
             Text("Di bawah ini memuat halaman resmi yang menampilkan peta perkiraan tinggi muka laut maksimum, wilayah yang berpotensi tsunami, dan status/saran peringatan ketika event tersedia.", color = fg.copy(alpha = .7f), fontSize = 11.sp)
@@ -919,7 +1264,7 @@ private fun TsunamiPage(latest: Quake?, history: List<Quake>, fg: Color, card: C
                     settings.domStorageEnabled = true
                     settings.useWideViewPort = true
                     settings.loadWithOverviewMode = true
-                    loadUrl("https://inatews.bmkg.go.id/")
+                    loadUrl("https://inatews.bmkg.go.id/web/tsunami")
                 }
             }
         )
@@ -940,7 +1285,7 @@ private fun TsunamiPage(latest: Quake?, history: List<Quake>, fg: Color, card: C
                 }, modifier = Modifier.weight(1f)) { Icon(Icons.Default.SaveAlt, null); Spacer(Modifier.width(4.dp)); Text("Simpan peta") }
             }
             Spacer(Modifier.height(14.dp))
-            Text("Riwayat tsunami tersimpan: " + history.size + " kejadian gempa terarsip lokal; yang berstatus potensi tsunami dapat dilihat di menu Riwayat.", color = fg.copy(alpha = .65f), fontSize = 10.sp)
+            Text("Event buletin InaTEWS unik di cache: ${newestBulletins.size} • belum ditandai berakhir: ${activeBulletins.size} • ditandai berakhir: ${endedBulletins.size}. Status aktual selalu diverifikasi pada InaTEWS.", color = fg.copy(alpha = .65f), fontSize = 10.sp)
         }
     }
 }
@@ -1020,7 +1365,7 @@ private fun InfoPage(fg: Color, card: Color, padding: PaddingValues) {
                     DetailLine("Realtime", "InaTEWS BMKG — inatews.bmkg.go.id/web/realtime", fg)
                     DetailLine("Tsunami", "InaTEWS BMKG — inatews.bmkg.go.id", fg)
                     DetailLine("Peta dasar", "OpenStreetMap / CARTO pada laman InaTEWS", fg)
-                    DetailLine("Versi", "1.3.0", fg)
+                    DetailLine("Versi", "1.6.0", fg)
                 }
             }
         }
