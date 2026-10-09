@@ -56,8 +56,11 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -68,6 +71,24 @@ private val Muted = Color(0xFF66758A)
 private val Pale = Color(0xFFF3F6FB)
 private val TsunamiRed = Color(0xFFB91C1C)
 private val TsunamiYellow = Color(0xFFFFF4CC)
+
+private fun wibClockText(): String =
+    java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale("id", "ID"))
+        .apply { timeZone = java.util.TimeZone.getTimeZone("Asia/Jakarta") }
+        .format(java.util.Date())
+
+@Composable
+private fun LiveWibClock(fg: Color) {
+    var now by remember { mutableStateOf(wibClockText()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            now = wibClockText()
+            val remainder = System.currentTimeMillis() % 1000L
+            delay((1000L - remainder).coerceAtLeast(1L))
+        }
+    }
+    Text("$now WIB", color = fg, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
+}
 
 data class Quake(
     val date: String,
@@ -143,17 +164,35 @@ private fun parseWrsQuake(obj: JSONObject): Quake? {
     val lat = obj.optDouble("lat", Double.NaN)
     val lon = obj.optDouble("lon", Double.NaN)
     val magnitude = obj.optDouble("magnitude", Double.NaN)
-    if (!magnitude.isFinite()) return null
-    val rawTime = obj.optString("time", "")
-    val dateObj = try { java.util.Date.from(java.time.Instant.parse(rawTime)) } catch (_: Exception) {
-        try { java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).parse(rawTime.replace("T", " ").take(19)) } catch (_: Exception) { java.util.Date() }
-    }
+    if (!magnitude.isFinite() || !lat.isFinite() || !lon.isFinite() ||
+        lat !in -90.0..90.0 || lon !in -180.0..180.0) return null
+
+    val rawTime = obj.optString("time", "").trim()
+    if (rawTime.isBlank()) return null
+    val dateObj = runCatching { java.util.Date.from(java.time.Instant.parse(rawTime)) }.getOrNull()
+        ?: runCatching { java.util.Date.from(java.time.OffsetDateTime.parse(rawTime).toInstant()) }.getOrNull()
+        ?: runCatching {
+            java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).apply {
+                isLenient = false
+                timeZone = java.util.TimeZone.getTimeZone("UTC")
+            }.parse(rawTime.replace("T", " ").take(19))
+        }.getOrNull()
+        ?: return null
+
     val dateFmt = java.text.SimpleDateFormat("dd MMM yyyy", java.util.Locale("id", "ID")).apply { timeZone = java.util.TimeZone.getTimeZone("Asia/Jakarta") }
     val timeFmt = java.text.SimpleDateFormat("HH:mm:ss 'WIB'", java.util.Locale("id", "ID")).apply { timeZone = java.util.TimeZone.getTimeZone("Asia/Jakarta") }
-    val latText = if (lat.isFinite()) String.format(java.util.Locale.US, "%.3f", lat) else "—"
-    val lonText = if (lon.isFinite()) String.format(java.util.Locale.US, "%.3f", lon) else "—"
-    val rawDepth = obj.optString("depth", "—")
-    return Quake(dateFmt.format(dateObj), timeFmt.format(dateObj), String.format(java.util.Locale.US, "%.1f", magnitude), rawDepth + if (rawDepth.isNotBlank() && rawDepth != "—" && !rawDepth.contains("km", true)) " km" else "", obj.optString("place", "Indonesia"), if (lat.isFinite() && lon.isFinite()) "$latText, $lonText" else "Koordinat tidak tersedia", if (lat.isFinite()) lat else -2.5, if (lon.isFinite()) lon else 118.0, obj.optString("potential", "—"), obj.optString("felt", ""), obj.optString("shakemap", ""), obj.optString("key", rawTime + "|" + magnitude + "|" + lat + "|" + lon))
+    val latText = String.format(java.util.Locale.US, "%.3f", lat)
+    val lonText = String.format(java.util.Locale.US, "%.3f", lon)
+    val rawDepth = obj.optString("depth", "—").trim()
+    val depth = when {
+        rawDepth.isBlank() || rawDepth == "—" -> "—"
+        rawDepth.contains("km", true) -> rawDepth
+        else -> "$rawDepth km"
+    }
+    return Quake(dateFmt.format(dateObj), timeFmt.format(dateObj), String.format(java.util.Locale.US, "%.1f", magnitude), depth,
+        obj.optString("place", "Indonesia"), "$latText, $lonText", lat, lon,
+        obj.optString("potential", "—"), obj.optString("felt", ""), obj.optString("shakemap", ""),
+        obj.optString("key", rawTime + "|" + magnitude + "|" + lat + "|" + lon))
 }
 private fun parseCoordinate(raw: String, isLatitude: Boolean): Double? {
     val cleaned = raw.replace(" LS", "").replace(" LU", "").replace(" BT", "").replace(" BB", "").replace(",", ".")
@@ -270,7 +309,7 @@ private fun WrsGempaApp() {
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     var lastUpdated by remember { mutableStateOf("Belum diperbarui") }
-    var filter by remember { mutableStateOf("Terbaru") }
+    var filter by remember { mutableStateOf("Realtime") }
     var bigAlerts by remember { mutableStateOf(prefs.getBoolean("big_alerts", true)) }
     var feltAlerts by remember { mutableStateOf(prefs.getBoolean("felt_alerts", true)) }
     var tsunamiAlerts by remember { mutableStateOf(prefs.getBoolean("tsunami_alerts", true)) }
