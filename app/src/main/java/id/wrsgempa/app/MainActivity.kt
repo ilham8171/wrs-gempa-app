@@ -398,6 +398,16 @@ private fun isTsunamiPotential(q: Quake): Boolean {
         s.contains("peringatan dini tsunami"))
 }
 
+private fun latestTsunamiBulletins(items: List<Quake>): List<Quake> =
+    items.filter { it.source == "InaTEWS" }
+        .groupBy { it.warningEventId?.takeIf(String::isNotBlank) ?: it.id.ifBlank { quakeKey(it) } }
+        .values
+        .mapNotNull { bulletins ->
+            // timesent is an ISO timestamp from the CAP feed and sorts chronologically.
+            // Fall back to event time only for older cached records without issue time.
+            bulletins.maxByOrNull { it.warningUpdatedAt?.ifBlank { null } ?: (it.date + " " + it.time) }
+        }
+
 private fun tsunamiStatus(q: Quake?): Pair<String, Color> {
     if (q == null) return "BELUM ADA DATA" to Muted
     val sourceText = q.tsunami.trim()
