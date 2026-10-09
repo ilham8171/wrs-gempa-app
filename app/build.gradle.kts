@@ -11,8 +11,8 @@ android {
         applicationId = "id.wrsgempa.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 7
-        versionName = "1.6.0"
+        versionCode = 8
+        versionName = "1.7.0"
     }
     buildFeatures { compose = true }
     compileOptions {

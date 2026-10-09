@@ -10,6 +10,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.location.Location
 import android.location.LocationManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.webkit.WebView
@@ -653,6 +654,7 @@ private fun WrsGempaApp(
                     subPage == 7 -> InfoPage(fg, card, padding)
                     subPage == 8 -> HistoryPage(history, fg, card, padding, { selected = it })
                     subPage == 9 -> ShakeMapsPage(history.filter { it.shakemap.isNotBlank() }, fg, card, padding, { selected = it })
+                    subPage == 10 -> WeatherPage(fg, card, padding)
                     else -> when (tab) {
                         0 -> HomePage(latest, quakes, feltQuakes, m5Quakes.size, loading, error, lastUpdated, fg, card, dark, { dark = !dark }, { refreshAction() }, { selected = it }, { tab = 1 }, { subPage = 6 }, padding)
                         1 -> MapPage(lastUpdated, fg, padding, { subPage = 8 }, { subPage = 9 })
@@ -1122,6 +1124,7 @@ private fun MorePage(fg: Color, card: Color, dark: Boolean, toggleDark: () -> Un
                     SettingsRow(Icons.Default.Image, "ShakeMaps", "Peta guncangan BMKG", fg) { navigate(9) }
                     SettingsRow(Icons.Default.Warning, "Dashboard tsunami", "InaTEWS + status", fg) { navigate(6) }
                     SettingsRow(Icons.Default.LocationOn, "Sekitar saya", "Jarak dari perangkat", fg) { navigate(5) }
+                    SettingsRow(Icons.Default.Cloud, "Cuaca & peringatan dini", "GPS atau koordinat pilihan • prakiraan 3 hari", fg) { navigate(10) }
                     SettingsRow(Icons.Default.Info, "Informasi", "Sumber dan peringatan", fg) { navigate(7) }
                 }
             }
@@ -1129,7 +1132,7 @@ private fun MorePage(fg: Color, card: Color, dark: Boolean, toggleDark: () -> Un
         item {
             Card(colors = CardDefaults.cardColors(containerColor = card), shape = RoundedCornerShape(18.dp)) {
                 Column(Modifier.padding(16.dp)) {
-                    Text("WRS GEMPA 1.6.0", color = fg, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+                    Text("WRS GEMPA 1.7.0", color = fg, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
                     Spacer(Modifier.height(6.dp))
                     Text("Monitoring gempa bumi, potensi tsunami, riwayat, ShakeMap, notifikasi, dan berbagi gambar informasi.", color = fg.copy(alpha = .75f), fontSize = 13.sp)
                     Spacer(Modifier.height(6.dp))
@@ -1290,6 +1293,169 @@ private fun TsunamiPage(latest: Quake?, history: List<Quake>, fg: Color, card: C
     }
 }
 
+
+private fun weatherDescription(code: Int): String = when (code) {
+    0 -> "Cerah"; 1 -> "Cerah berawan"; 2 -> "Berawan sebagian"; 3 -> "Berawan"
+    45, 48 -> "Berkabut"; 51, 53, 55, 56, 57 -> "Gerimis"
+    61, 63, 65, 66, 67 -> "Hujan"; 71, 73, 75, 77 -> "Salju"
+    80, 81, 82 -> "Hujan lokal"; 85, 86 -> "Hujan salju"
+    95 -> "Badai petir"; 96, 99 -> "Badai petir dan hujan es"
+    else -> "Kondisi tidak diketahui"
+}
+
+private suspend fun fetchWeatherForecast(lat: Double, lon: Double): JSONObject = withContext(Dispatchers.IO) {
+    require(lat in -90.0..90.0 && lon in -180.0..180.0) { "Koordinat tidak valid." }
+    val endpoint = "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon" +
+        "&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,weather_code,wind_speed_10m" +
+        "&hourly=temperature_2m,precipitation_probability,weather_code" +
+        "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max" +
+        "&forecast_days=3&timezone=Asia%2FJakarta"
+    val connection = URL(endpoint).openConnection() as HttpURLConnection
+    connection.connectTimeout = 12000
+    connection.readTimeout = 15000
+    connection.setRequestProperty("User-Agent", "WRS-GEMPA-Android")
+    connection.setRequestProperty("Accept", "application/json")
+    try {
+        if (connection.responseCode !in 200..299) error("Layanan cuaca tidak merespons (HTTP ${connection.responseCode}).")
+        JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+    } finally { connection.disconnect() }
+}
+
+@Composable
+private fun WeatherPage(fg: Color, card: Color, padding: PaddingValues) {
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("wrs_alerts", Context.MODE_PRIVATE) }
+    var latText by remember { mutableStateOf(prefs.getString("weather_lat", prefs.getString("user_lat", "") ?: "") ?: "") }
+    var lonText by remember { mutableStateOf(prefs.getString("weather_lon", prefs.getString("user_lon", "") ?: "") ?: "") }
+    var forecast by remember { mutableStateOf<JSONObject?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    var message by remember { mutableStateOf("Gunakan GPS atau masukkan koordinat lokasi pantauan.") }
+    val scope = rememberCoroutineScope()
+
+    fun loadForecast(lat: Double, lon: Double) {
+        if (lat !in -90.0..90.0 || lon !in -180.0..180.0) {
+            message = "Koordinat tidak valid. Latitude -90..90 dan longitude -180..180."
+            return
+        }
+        latText = "%.5f".format(java.util.Locale.US, lat)
+        lonText = "%.5f".format(java.util.Locale.US, lon)
+        prefs.edit().putString("weather_lat", latText).putString("weather_lon", lonText)
+            .putString("user_lat", latText).putString("user_lon", lonText).apply()
+        scope.launch {
+            busy = true
+            message = "Memuat prakiraan cuaca…"
+            try {
+                forecast = fetchWeatherForecast(lat, lon)
+                message = "Prakiraan diperbarui • %.4f, %.4f".format(java.util.Locale.US, lat, lon)
+            } catch (e: Exception) {
+                message = "Gagal memuat cuaca: ${e.message ?: "periksa koneksi internet"}"
+            } finally { busy = false }
+        }
+    }
+
+    fun readGps() {
+        val fine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val coarse = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        if (!fine && !coarse) { message = "Izin lokasi belum diberikan."; return }
+        try {
+            val manager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+            val loc = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER).mapNotNull {
+                try { manager.getLastKnownLocation(it) } catch (_: Exception) { null }
+            }.maxByOrNull { it.time }
+            if (loc == null) message = "Lokasi belum tersedia. Aktifkan GPS dan coba lagi."
+            else loadForecast(loc.latitude, loc.longitude)
+        } catch (_: Exception) { message = "Lokasi gagal dibaca. Masukkan koordinat secara manual." }
+    }
+
+    val locationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
+        if (grants[Manifest.permission.ACCESS_FINE_LOCATION] == true || grants[Manifest.permission.ACCESS_COARSE_LOCATION] == true) readGps()
+        else message = "Izin lokasi ditolak. Koordinat manual tetap bisa digunakan."
+    }
+    LaunchedEffect(Unit) {
+        val lat = latText.toDoubleOrNull()
+        val lon = lonText.toDoubleOrNull()
+        if (lat != null && lon != null) loadForecast(lat, lon)
+    }
+
+    val current = forecast?.optJSONObject("current")
+    val daily = forecast?.optJSONObject("daily")
+    val times = daily?.optJSONArray("time")
+    val codes = daily?.optJSONArray("weather_code")
+    val highs = daily?.optJSONArray("temperature_2m_max")
+    val lows = daily?.optJSONArray("temperature_2m_min")
+    val rain = daily?.optJSONArray("precipitation_probability_max")
+
+    LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        item { Header(fg, "Cuaca & Peringatan", "Prakiraan berdasarkan GPS atau lokasi pilihan") }
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = card), shape = RoundedCornerShape(20.dp)) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("LOKASI PANTAUAN", color = fg, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    OutlinedTextField(value = latText, onValueChange = { latText = it }, label = { Text("Latitude") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(value = lonText, onValueChange = { lonText = it }, label = { Text("Longitude") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    Button(onClick = {
+                        val lat = latText.toDoubleOrNull(); val lon = lonText.toDoubleOrNull()
+                        if (lat == null || lon == null) message = "Masukkan latitude dan longitude yang benar."
+                        else loadForecast(lat, lon)
+                    }, modifier = Modifier.fillMaxWidth(), enabled = !busy) {
+                        Icon(Icons.Default.Search, null); Spacer(Modifier.width(6.dp)); Text("Gunakan lokasi ini")
+                    }
+                    OutlinedButton(onClick = {
+                        val fine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                        val coarse = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                        if (fine || coarse) readGps()
+                        else locationLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+                    }, modifier = Modifier.fillMaxWidth(), enabled = !busy) {
+                        Icon(Icons.Default.MyLocation, null); Spacer(Modifier.width(6.dp)); Text("Pakai GPS saya")
+                    }
+                    Text(message, color = fg.copy(alpha = .7f), fontSize = 12.sp)
+                }
+            }
+        }
+        if (busy) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+        if (current != null) item {
+            Card(colors = CardDefaults.cardColors(containerColor = Navy), shape = RoundedCornerShape(22.dp)) {
+                Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("CUACA SAAT INI", color = Color(0xFFB9D4FF), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("%.1f°C".format(java.util.Locale.US, current.optDouble("temperature_2m", Double.NaN)), color = Color.White, fontSize = 38.sp, fontWeight = FontWeight.ExtraBold)
+                    Text(weatherDescription(current.optInt("weather_code", -1)), color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    Text("Terasa ${current.optDouble("apparent_temperature", 0.0)}°C • Kelembapan ${current.optInt("relative_humidity_2m", 0)}%", color = Color(0xFFD9E6FF), fontSize = 12.sp)
+                    Text("Angin ${current.optDouble("wind_speed_10m", 0.0)} km/jam • Hujan ${current.optDouble("precipitation", 0.0)} mm", color = Color(0xFFD9E6FF), fontSize = 12.sp)
+                }
+            }
+        }
+        if (times != null) item { Text("Prakiraan 3 hari", color = fg, fontSize = 18.sp, fontWeight = FontWeight.Bold) }
+        if (times != null) items(times.length()) { i ->
+            val high = highs?.optDouble(i, Double.NaN) ?: Double.NaN
+            val low = lows?.optDouble(i, Double.NaN) ?: Double.NaN
+            val rainChance = rain?.optInt(i, -1) ?: -1
+            Card(colors = CardDefaults.cardColors(containerColor = card), shape = RoundedCornerShape(16.dp)) {
+                Row(Modifier.fillMaxWidth().padding(15.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(times.optString(i, "—"), color = fg, fontWeight = FontWeight.Bold)
+                        Text(weatherDescription(codes?.optInt(i, -1) ?: -1), color = fg.copy(alpha = .7f), fontSize = 12.sp)
+                        Text(if (rainChance >= 0) "Peluang hujan maks. $rainChance%" else "Peluang hujan tidak tersedia", color = fg.copy(alpha = .65f), fontSize = 11.sp)
+                    }
+                    Text("${if (high.isFinite()) "%.0f".format(java.util.Locale.US, high) else "—"}° / ${if (low.isFinite()) "%.0f".format(java.util.Locale.US, low) else "—"}°", color = Blue, fontWeight = FontWeight.ExtraBold)
+                }
+            }
+        }
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = card), shape = RoundedCornerShape(18.dp)) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Peringatan dini cuaca", color = fg, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text("Peringatan resmi dan wilayah terdampak harus diverifikasi melalui BMKG. Prakiraan umum bukan pengganti peringatan dini.", color = fg.copy(alpha = .72f), fontSize = 12.sp)
+                    Button(onClick = { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.bmkg.go.id/cuaca/peringatan-dini-cuaca"))) } }, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Default.Warning, null); Spacer(Modifier.width(6.dp)); Text("Buka Peringatan Dini BMKG")
+                    }
+                }
+            }
+        }
+        item { Text("Sumber prakiraan: Open-Meteo. Peringatan resmi: BMKG. Ikuti arahan otoritas setempat.", color = fg.copy(alpha = .58f), fontSize = 10.sp) }
+    }
+}
+
+
 @Composable
 private fun NearbyPage(quakes: List<Quake>, fg: Color, card: Color, padding: PaddingValues, open: (Quake) -> Unit) {
     val context = LocalContext.current
@@ -1365,7 +1531,7 @@ private fun InfoPage(fg: Color, card: Color, padding: PaddingValues) {
                     DetailLine("Realtime", "InaTEWS BMKG — inatews.bmkg.go.id/web/realtime", fg)
                     DetailLine("Tsunami", "InaTEWS BMKG — inatews.bmkg.go.id", fg)
                     DetailLine("Peta dasar", "OpenStreetMap / CARTO pada laman InaTEWS", fg)
-                    DetailLine("Versi", "1.6.0", fg)
+                    DetailLine("Versi", "1.7.0", fg)
                 }
             }
         }
