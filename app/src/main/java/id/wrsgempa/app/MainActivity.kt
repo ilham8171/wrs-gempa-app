@@ -103,7 +103,8 @@ data class Quake(
     val felt: String = "",
     val shakemap: String = "",
     val id: String = "",
-    val source: String = "WRS GEMPA"
+    val source: String = "WRS GEMPA",
+    val warningEnded: Boolean? = null
 ) {
     val magnitudeValue: Double get() = magnitude.replace(",", ".").toDoubleOrNull() ?: 0.0
 }
@@ -220,7 +221,8 @@ private fun parseWrsQuake(obj: JSONObject): Quake? {
         obj.optString("place", "Indonesia"), "$latText, $lonText", lat, lon,
         obj.optString("potential", "—"), obj.optString("felt", ""), obj.optString("shakemap", ""),
         obj.optString("key", rawTime + "|" + magnitude + "|" + lat + "|" + lon),
-        obj.optString("source", "WRS GEMPA"))
+        obj.optString("source", "WRS GEMPA").ifBlank { "WRS GEMPA" },
+        if (obj.has("warningEnded") && !obj.isNull("warningEnded")) obj.optBoolean("warningEnded") else null)
 }
 private fun parseCoordinate(raw: String): Double? {
     val cleaned = raw.trim()
@@ -305,6 +307,7 @@ private fun quakeJson(q: Quake): JSONObject = JSONObject().apply {
     put("shakemap", q.shakemap)
     put("id", q.id)
     put("source", q.source)
+    q.warningEnded?.let { put("warningEnded", it) }
 }
 
 private fun quakeFromNotificationIntent(intent: Intent): Quake? {
@@ -343,7 +346,8 @@ private fun quakeFromJson(obj: JSONObject): Quake = Quake(
     felt = obj.optString("felt"),
     shakemap = obj.optString("shakemap"),
     id = obj.optString("id"),
-    source = obj.optString("source", "WRS GEMPA")
+    source = obj.optString("source", "WRS GEMPA").ifBlank { "WRS GEMPA" },
+    warningEnded = if (obj.has("warningEnded") && !obj.isNull("warningEnded")) obj.optBoolean("warningEnded") else null
 )
 
 private fun loadHistory(prefs: android.content.SharedPreferences): List<Quake> {
@@ -496,6 +500,7 @@ private fun WrsGempaApp(
                 // Alert-only records without valid quake parameters belong to the tsunami dashboard,
                 // not the earthquake archive (avoids phantom M0 entries or invented coordinates).
                 if (!latitude.isFinite() || !longitude.isFinite() || !magnitude.isFinite() ||
+                    magnitude <= 0.0 || magnitude > 10.0 ||
                     latitude !in -90.0..90.0 || longitude !in -180.0..180.0 || eventTime.isBlank()) {
                     return@mapNotNull null
                 }
@@ -509,6 +514,7 @@ private fun WrsGempaApp(
                     put("time", eventTime)
                     put("potential", item.optString("headline", item.optString("subject", item.optString("potential", "Peringatan tsunami InaTEWS"))))
                     put("source", "InaTEWS")
+                    put("warningEnded", item.optBoolean("ended", false))
                     put("felt", item.optString("description", item.optString("instruction", "")))
                     put("shakemap", item.optString("shakemap", ""))
                 }
@@ -579,7 +585,7 @@ private fun WrsGempaApp(
                 when {
                     selected != null -> DetailPage(selected!!, fg, card, { selected = null }, padding)
                     subPage == 5 -> NearbyPage(quakes + listOfNotNull(latest), fg, card, padding, { selected = it })
-                    subPage == 6 -> TsunamiPage(latest, history.filter(::isTsunamiPotential), fg, card, padding)
+                    subPage == 6 -> TsunamiPage(latest, history.filter { it.source == "InaTEWS" }, fg, card, padding)
                     subPage == 7 -> InfoPage(fg, card, padding)
                     subPage == 8 -> HistoryPage(history, fg, card, padding, { selected = it })
                     subPage == 9 -> ShakeMapsPage(history.filter { it.shakemap.isNotBlank() }, fg, card, padding, { selected = it })
