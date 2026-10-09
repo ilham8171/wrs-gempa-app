@@ -639,8 +639,8 @@ private fun WrsGempaApp(
             containerColor = bg,
             bottomBar = {
                 NavigationBar(containerColor = card) {
-                    val labels = listOf("Beranda", "Peta", "Data", "Peringatan", "Menu")
-                    val icons = listOf(Icons.Default.Home, Icons.Default.Map, Icons.Default.Public, Icons.Default.NotificationsActive, Icons.Default.Menu)
+                    val labels = listOf("Beranda", "Cuaca", "Data", "Peringatan", "Menu")
+                    val icons = listOf(Icons.Default.Home, Icons.Default.Cloud, Icons.Default.Public, Icons.Default.NotificationsActive, Icons.Default.Menu)
                     labels.forEachIndexed { index, label ->
                         NavigationBarItem(
                             selected = tab == index && subPage == -1,
@@ -662,8 +662,8 @@ private fun WrsGempaApp(
                     subPage == 9 -> ShakeMapsPage(history.filter { it.shakemap.isNotBlank() }, fg, card, padding, { selected = it })
                     subPage == 10 -> WeatherPage(fg, card, padding, prefs)
                     else -> when (tab) {
-                        0 -> HomePage(latest, quakes, feltQuakes, m5Quakes.size, history.any { it.warningEventId != null && it.warningEnded == false }, loading, error, lastUpdated, fg, card, dark, { dark = !dark }, { refreshAction() }, { selected = it }, { tab = 1 }, { subPage = 6 }, { subPage = 10 }, padding)
-                        1 -> MapPage(lastUpdated, quakes + listOfNotNull(latest), fg, card, padding, { subPage = 8 }, { subPage = 9 }, { subPage = 10 })
+                        0 -> HomePage(latest, quakes, feltQuakes, m5Quakes.size, history.any { it.warningEventId != null && it.warningEnded == false }, loading, error, lastUpdated, fg, card, dark, { dark = !dark }, { refreshAction() }, { selected = it }, { tab = 2 }, { subPage = 6 }, { subPage = 10 }, padding)
+                        1 -> WeatherPage(fg, card, padding, prefs)
                         2 -> QuakeListPage(quakes, feltQuakes, m5Quakes, history.filter(::isTsunamiPotential), filter, { filter = it }, fg, card, padding, { selected = it })
                         3 -> NotificationPage(latest, quakes, bigAlerts, { bigAlerts = it; prefs.edit().putBoolean("big_alerts", it).apply() }, feltAlerts, { feltAlerts = it; prefs.edit().putBoolean("felt_alerts", it).apply() }, tsunamiAlerts, { tsunamiAlerts = it; prefs.edit().putBoolean("tsunami_alerts", it).apply() }, nearbyAlerts, { nearbyAlerts = it; prefs.edit().putBoolean("nearby_alerts", it).apply() }, minMagnitude, { minMagnitude = it; prefs.edit().putString("min_magnitude", it).apply() }, radius, { radius = it; prefs.edit().putString("radius", it).apply() }, fg, card, padding, { selected = it })
                         else -> MorePage(fg, card, dark, { dark = !dark }, padding, { page -> subPage = page })
@@ -785,7 +785,7 @@ private fun HomePage(
                         }
                         Text(if (weatherFresh) "Cache diperbarui " + java.text.SimpleDateFormat("dd MMM, HH:mm", java.util.Locale("id", "ID")).format(java.util.Date(weatherUpdatedAt)) else "Data tersimpan mungkin sudah lama — ketuk untuk cek", color = if (weatherFresh) Color(0xFF16845B) else Color(0xFFB7791F), fontSize = 10.sp, modifier = Modifier.padding(top = 8.dp))
                     } else {
-                        Text("Lihat prakiraan cuaca resmi BMKG per periode. Pilih kode wilayah sekali agar ringkasan tampil di beranda.", color = fg.copy(alpha = .72f), fontSize = 12.sp)
+                        Text("Prakiraan otomatis mengikuti lokasi perangkat. Buka untuk mengaktifkan GPS dan memuat data BMKG.", color = fg.copy(alpha = .72f), fontSize = 12.sp)
                         Text("Atur lokasi cuaca →", color = Blue, fontWeight = FontWeight.Bold, fontSize = 12.sp, modifier = Modifier.padding(top = 9.dp))
                     }
                 }
@@ -809,9 +809,22 @@ private fun HomePage(
             Text("Fitur utama dalam satu sentuhan", color = fg.copy(alpha = .62f), fontSize = 11.sp)
             Spacer(Modifier.height(10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                QuickAction(Icons.Default.Map, "Peta gempa", "Pantau lokasi", card, fg, Modifier.weight(1f), openMap)
+                QuickAction(Icons.Default.Public, "Data gempa", "Katalog terbaru", card, fg, Modifier.weight(1f), openMap)
                 QuickAction(Icons.Default.CloudQueue, "Prakiraan", "Cuaca BMKG", card, fg, Modifier.weight(1f), openWeather)
                 QuickAction(Icons.Default.NotificationsActive, "Peringatan", "Info tsunami", card, fg, Modifier.weight(1f), openTsunami)
+            }
+        }
+        item {
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Peta aktivitas gempa", color = fg, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp)
+                        Text("Titik merah berdenyut • ketuk kejadian untuk detail", color = fg.copy(alpha = .62f), fontSize = 11.sp)
+                    }
+                    TextButton(onClick = openMap) { Text("Data gempa") }
+                }
+                Spacer(Modifier.height(8.dp))
+                QuakePulseMap(quakes = (listOfNotNull(latest) + quakes).distinctBy(::quakeKey).take(12), card = card, fg = fg, open = open)
             }
         }
         item {
@@ -820,7 +833,7 @@ private fun HomePage(
                     Text("Gempa terbaru", color = fg, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp)
                     Text("Data kejadian yang berhasil diterima", color = fg.copy(alpha = .62f), fontSize = 11.sp)
                 }
-                TextButton(onClick = openMap) { Text("Lihat peta") }
+                TextButton(onClick = openMap) { Text("Lihat semua") }
             }
         }
         if (quakes.isEmpty() && latest == null && loading) {
@@ -853,6 +866,88 @@ private fun HomePage(
             }
             if (error.isNotBlank()) Text(error, color = Color(0xFFD32F2F), fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
             Text("Data mengikuti sumber yang berhasil diterima. Untuk keputusan keselamatan, utamakan pengumuman resmi BMKG.", color = fg.copy(alpha = .58f), fontSize = 10.sp, modifier = Modifier.padding(top = 12.dp))
+        }
+    }
+}
+
+
+@Composable
+private fun QuakePulseMap(quakes: List<Quake>, card: Color, fg: Color, open: (Quake) -> Unit) {
+    val transition = rememberInfiniteTransition(label = "quake-pulse")
+    val pulse by transition.animateFloat(initialValue = 0.25f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(animation = tween(1500), repeatMode = RepeatMode.Reverse),
+        label = "quake-pulse-alpha")
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Card(colors = CardDefaults.cardColors(containerColor = if (card == Color.White) Color(0xFFEAF2FC) else card),
+            shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth().height(190.dp).clickable { quakes.firstOrNull()?.let(open) }) {
+            Box(Modifier.fillMaxSize()) {
+                Canvas(Modifier.fillMaxSize()) {
+                    val w = size.width; val h = size.height
+                    for (i in 1..5) {
+                        val x = w * i / 6f
+                        drawLine(Color(0xFF9CB6D3).copy(alpha = .22f), androidx.compose.ui.geometry.Offset(x, 0f), androidx.compose.ui.geometry.Offset(x, h), 1.dp.toPx())
+                    }
+                    for (i in 1..3) {
+                        val y = h * i / 4f
+                        drawLine(Color(0xFF9CB6D3).copy(alpha = .22f), androidx.compose.ui.geometry.Offset(0f, y), androidx.compose.ui.geometry.Offset(w, y), 1.dp.toPx())
+                    }
+                    val land = Color(0xFF83B9A7).copy(alpha = .42f)
+                    val islands = listOf(
+                        listOf(.08f to .42f, .18f to .38f, .31f to .43f, .35f to .48f, .22f to .51f, .10f to .48f),
+                        listOf(.36f to .50f, .44f to .47f, .54f to .51f, .48f to .55f, .38f to .54f),
+                        listOf(.51f to .61f, .61f to .57f, .73f to .63f, .68f to .68f, .56f to .66f),
+                        listOf(.73f to .45f, .81f to .42f, .87f to .48f, .82f to .54f, .75f to .51f),
+                        listOf(.62f to .76f, .72f to .73f, .79f to .78f, .71f to .82f, .63f to .80f)
+                    )
+                    islands.forEach { points ->
+                        val path = androidx.compose.ui.graphics.Path().apply {
+                            moveTo(points.first().first * w, points.first().second * h)
+                            points.drop(1).forEach { lineTo(it.first * w, it.second * h) }
+                            close()
+                        }
+                        drawPath(path, land)
+                    }
+                    quakes.forEach { q ->
+                        if (!q.latitude.isFinite() || !q.longitude.isFinite()) return@forEach
+                        val x = ((((q.longitude + 180.0) / 360.0).toFloat()) * .86f + .07f) * w
+                        val y = (((5.0 - q.latitude) / 25.0).toFloat().coerceIn(.08f, .92f)) * h
+                        val radius = 7f + q.magnitudeValue.coerceIn(1.0, 8.0).toFloat() * 1.4f
+                        drawCircle(Color(0xFFFF3434).copy(alpha = .12f + .20f * pulse), radius = radius * 2.3f, center = androidx.compose.ui.geometry.Offset(x, y))
+                        drawCircle(Color(0xFFFF3434).copy(alpha = .20f + .32f * pulse), radius = radius * 1.45f, center = androidx.compose.ui.geometry.Offset(x, y))
+                        drawCircle(Color(0xFFE32636).copy(alpha = .9f), radius = radius.coerceAtMost(13f), center = androidx.compose.ui.geometry.Offset(x, y))
+                    }
+                }
+                Surface(color = Color(0xDD0A1730), shape = RoundedCornerShape(bottomEnd = 14.dp), modifier = Modifier.align(Alignment.TopStart)) {
+                    Text("INDONESIA • AKTIVITAS GEMPA", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 11.dp, vertical = 8.dp))
+                }
+                Surface(color = Color.White.copy(alpha = .92f), shape = RoundedCornerShape(50.dp), modifier = Modifier.align(Alignment.BottomEnd).padding(10.dp)) {
+                    Row(Modifier.padding(horizontal = 9.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(7.dp).background(Color(0xFFE32636), CircleShape))
+                        Spacer(Modifier.width(5.dp))
+                        Text("${quakes.size} kejadian", color = Navy, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+        if (quakes.isNotEmpty()) {
+            Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                quakes.take(8).forEach { q ->
+                    Card(colors = CardDefaults.cardColors(containerColor = card), shape = RoundedCornerShape(15.dp), modifier = Modifier.width(220.dp).clickable { open(q) }) {
+                        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.size(11.dp).background(Color(0xFFE32636).copy(alpha = pulse), CircleShape))
+                            Spacer(Modifier.width(9.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("M ${q.magnitude}", color = fg, fontWeight = FontWeight.ExtraBold, fontSize = 13.sp)
+                                Text(q.location, color = fg.copy(alpha = .72f), fontSize = 11.sp, maxLines = 2)
+                                Text("${q.date} ${q.time}", color = fg.copy(alpha = .55f), fontSize = 9.sp)
+                            }
+                            Icon(Icons.Default.ChevronRight, null, tint = fg.copy(alpha = .5f), modifier = Modifier.size(17.dp))
+                        }
+                    }
+                }
+            }
+        } else {
+            Text("Titik kejadian akan tampil saat data gempa berhasil dimuat.", color = fg.copy(alpha = .65f), fontSize = 11.sp)
         }
     }
 }
