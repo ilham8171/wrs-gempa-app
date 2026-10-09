@@ -19,6 +19,16 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -80,6 +90,16 @@ private fun wibClockText(): String =
 @Composable
 private fun LiveWibClock(fg: Color) {
     var now by remember { mutableStateOf(wibClockText()) }
+    val pulse = rememberInfiniteTransition(label = "clockPulse")
+        .animateFloat(
+            initialValue = 0.35f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(900, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "clockDotAlpha"
+        )
     LaunchedEffect(Unit) {
         while (true) {
             now = wibClockText()
@@ -87,7 +107,10 @@ private fun LiveWibClock(fg: Color) {
             delay((1000L - remainder).coerceAtLeast(1L))
         }
     }
-    Text("$now WIB", color = fg, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+        Box(Modifier.size(7.dp).background(Color(0xFF2DD4BF).copy(alpha = pulse.value), CircleShape))
+        Text("$now WIB", color = fg, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
+    }
 }
 
 data class Quake(
