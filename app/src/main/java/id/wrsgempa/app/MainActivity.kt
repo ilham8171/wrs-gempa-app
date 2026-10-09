@@ -192,9 +192,12 @@ private fun parseWrsQuake(obj: JSONObject): Quake? {
     val lat = obj.optDouble("lat", Double.NaN)
     val lon = obj.optDouble("lon", Double.NaN)
     val magnitude = obj.optDouble("magnitude", Double.NaN)
-    if (!magnitude.isFinite() || !lat.isFinite() || !lon.isFinite() ||
+    if (!magnitude.isFinite() || magnitude <= 0.0 || magnitude > 10.0 ||
+        !lat.isFinite() || !lon.isFinite() ||
         lat !in -90.0..90.0 || lon !in -180.0..180.0) return null
 
+    val place = obj.optString("place", "").trim()
+    if (place.isBlank()) return null
     val rawTime = obj.optString("time", "").trim()
     if (rawTime.isBlank()) return null
     val dateObj = runCatching { java.util.Date.from(java.time.Instant.parse(rawTime)) }.getOrNull()
@@ -218,7 +221,7 @@ private fun parseWrsQuake(obj: JSONObject): Quake? {
         else -> "$rawDepth km"
     }
     return Quake(dateFmt.format(dateObj), timeFmt.format(dateObj), String.format(java.util.Locale.US, "%.1f", magnitude), depth,
-        obj.optString("place", "Indonesia"), "$latText, $lonText", lat, lon,
+        place, "$latText, $lonText", lat, lon,
         obj.optString("potential", "—"), obj.optString("felt", ""), obj.optString("shakemap", ""),
         obj.optString("key", rawTime + "|" + magnitude + "|" + lat + "|" + lon),
         obj.optString("source", "WRS GEMPA").ifBlank { "WRS GEMPA" },
@@ -333,22 +336,35 @@ private fun quakeFromNotificationIntent(intent: Intent): Quake? {
     return parseWrsQuake(payload)
 }
 
-private fun quakeFromJson(obj: JSONObject): Quake = Quake(
-    date = obj.optString("date"),
-    time = obj.optString("time"),
-    magnitude = obj.optString("magnitude"),
-    depth = obj.optString("depth"),
-    location = obj.optString("location"),
-    coordinates = obj.optString("coordinates"),
-    latitude = obj.optDouble("latitude", -2.5),
-    longitude = obj.optDouble("longitude", 118.0),
-    tsunami = obj.optString("tsunami"),
-    felt = obj.optString("felt"),
-    shakemap = obj.optString("shakemap"),
-    id = obj.optString("id"),
-    source = obj.optString("source", "WRS GEMPA").ifBlank { "WRS GEMPA" },
-    warningEnded = if (obj.has("warningEnded") && !obj.isNull("warningEnded")) obj.optBoolean("warningEnded") else null
-)
+private fun quakeFromJson(obj: JSONObject): Quake? {
+    val latitude = obj.optDouble("latitude", Double.NaN)
+    val longitude = obj.optDouble("longitude", Double.NaN)
+    val magnitude = obj.optString("magnitude", "").replace(",", ".").toDoubleOrNull() ?: return null
+    val date = obj.optString("date", "").trim()
+    val time = obj.optString("time", "").trim()
+    val location = obj.optString("location", "").trim()
+    if (!latitude.isFinite() || latitude !in -90.0..90.0 ||
+        !longitude.isFinite() || longitude !in -180.0..180.0 ||
+        !magnitude.isFinite() || magnitude <= 0.0 || magnitude > 10.0 ||
+        date.isBlank() || time.isBlank() || location.isBlank()) return null
+
+    return Quake(
+        date = date,
+        time = time,
+        magnitude = String.format(java.util.Locale.US, "%.1f", magnitude),
+        depth = obj.optString("depth", "—"),
+        location = location,
+        coordinates = obj.optString("coordinates").ifBlank { "%.3f, %.3f".format(java.util.Locale.US, latitude, longitude) },
+        latitude = latitude,
+        longitude = longitude,
+        tsunami = obj.optString("tsunami"),
+        felt = obj.optString("felt"),
+        shakemap = obj.optString("shakemap"),
+        id = obj.optString("id"),
+        source = obj.optString("source", "WRS GEMPA").ifBlank { "WRS GEMPA" },
+        warningEnded = if (obj.has("warningEnded") && !obj.isNull("warningEnded")) obj.optBoolean("warningEnded") else null
+    )
+}
 
 private fun loadHistory(prefs: android.content.SharedPreferences): List<Quake> {
     return try {
