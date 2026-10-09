@@ -102,7 +102,8 @@ data class Quake(
     val tsunami: String,
     val felt: String = "",
     val shakemap: String = "",
-    val id: String = ""
+    val id: String = "",
+    val source: String = "WRS GEMPA"
 ) {
     val magnitudeValue: Double get() = magnitude.replace(",", ".").toDoubleOrNull() ?: 0.0
 }
@@ -218,7 +219,8 @@ private fun parseWrsQuake(obj: JSONObject): Quake? {
     return Quake(dateFmt.format(dateObj), timeFmt.format(dateObj), String.format(java.util.Locale.US, "%.1f", magnitude), depth,
         obj.optString("place", "Indonesia"), "$latText, $lonText", lat, lon,
         obj.optString("potential", "—"), obj.optString("felt", ""), obj.optString("shakemap", ""),
-        obj.optString("key", rawTime + "|" + magnitude + "|" + lat + "|" + lon))
+        obj.optString("key", rawTime + "|" + magnitude + "|" + lat + "|" + lon),
+        obj.optString("source", "WRS GEMPA"))
 }
 private fun parseCoordinate(raw: String, isLatitude: Boolean): Double? {
     val cleaned = raw.replace(" LS", "").replace(" LU", "").replace(" BT", "").replace(" BB", "").replace(",", ".")
@@ -248,7 +250,8 @@ private fun parseQuake(obj: JSONObject): Quake {
         tsunami = obj.optString("Potensi", ""),
         felt = obj.optString("Dirasakan", ""),
         shakemap = obj.optString("Shakemap", ""),
-        id = obj.optString("ID", obj.optString("DateTime", ""))
+        id = obj.optString("ID", obj.optString("DateTime", "")),
+        source = "BMKG"
     )
 }
 
@@ -276,6 +279,7 @@ private fun quakeJson(q: Quake): JSONObject = JSONObject().apply {
     put("felt", q.felt)
     put("shakemap", q.shakemap)
     put("id", q.id)
+    put("source", q.source)
 }
 
 private fun quakeFromNotificationIntent(intent: Intent): Quake? {
@@ -296,6 +300,7 @@ private fun quakeFromNotificationIntent(intent: Intent): Quake? {
         put("potential", intent.getStringExtra("quake_potential").orEmpty().ifBlank { "Status tsunami: periksa BMKG/InaTEWS" })
         put("felt", intent.getStringExtra("quake_felt").orEmpty())
         put("shakemap", intent.getStringExtra("quake_shakemap").orEmpty())
+        put("source", intent.getStringExtra("quake_source").orEmpty().ifBlank { "WRS GEMPA" })
     }
     return parseWrsQuake(payload)
 }
@@ -312,7 +317,8 @@ private fun quakeFromJson(obj: JSONObject): Quake = Quake(
     tsunami = obj.optString("tsunami"),
     felt = obj.optString("felt"),
     shakemap = obj.optString("shakemap"),
-    id = obj.optString("id")
+    id = obj.optString("id"),
+    source = obj.optString("source", "WRS GEMPA")
 )
 
 private fun loadHistory(prefs: android.content.SharedPreferences): List<Quake> {
@@ -729,7 +735,7 @@ private fun QuakeRow(quake: Quake, card: Color, fg: Color, open: () -> Unit) {
 @Composable
 private fun QuakeListPage(quakes: List<Quake>, felt: List<Quake>, m5: List<Quake>, tsunami: List<Quake>, filter: String, setFilter: (String) -> Unit, fg: Color, card: Color, padding: PaddingValues, open: (Quake) -> Unit) {
     Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 18.dp)) {
-        Header(fg, "Informasi Gempa", "Data BMKG • semua waktu WIB")
+        Header(fg, "Informasi Gempa", "Sumber sesuai kejadian • semua waktu WIB")
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             listOf("Realtime", "Dirasakan", "M ≥ 5.0", "Tsunami").forEach { item ->
@@ -843,7 +849,7 @@ private fun DetailPage(quake: Quake, fg: Color, card: Color, back: () -> Unit, p
                     DetailLine("Magnitudo", "M " + quake.magnitude, fg)
                     DetailLine("Dirasakan", quake.felt.ifBlank { "Tidak ada data dirasakan" }, fg)
                     DetailLine("Potensi tsunami", quake.tsunami.ifBlank { "Tidak ada keterangan" }, fg)
-                    DetailLine("Sumber", "WRS GEMPA • BMKG / InaTEWS / USGS sesuai data kejadian", fg)
+                    DetailLine("Sumber data", quake.source, fg)
                     Text(status, color = if (isTsunamiPotential(quake)) TsunamiRed else Color(0xFF147A51), fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(top = 8.dp))
                 }
             }
