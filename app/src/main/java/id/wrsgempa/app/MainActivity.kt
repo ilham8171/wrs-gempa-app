@@ -882,6 +882,8 @@ private fun QuakeRow(quake: Quake, card: Color, fg: Color, open: () -> Unit) {
 
 @Composable
 private fun QuakeListPage(quakes: List<Quake>, felt: List<Quake>, m5: List<Quake>, tsunami: List<Quake>, filter: String, setFilter: (String) -> Unit, fg: Color, card: Color, padding: PaddingValues, open: (Quake) -> Unit) {
+    var searchText by remember { mutableStateOf("") }
+    var sortMagnitude by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 18.dp)) {
         Header(fg, "Informasi Gempa", "Sumber sesuai kejadian • semua waktu WIB")
         Spacer(Modifier.height(12.dp))
@@ -891,11 +893,36 @@ private fun QuakeListPage(quakes: List<Quake>, felt: List<Quake>, m5: List<Quake
             }
         }
         Spacer(Modifier.height(8.dp))
+        OutlinedTextField(
+            value = searchText,
+            onValueChange = { searchText = it },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            label = { Text("Cari wilayah atau koordinat") },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+            trailingIcon = { if (searchText.isNotBlank()) IconButton(onClick = { searchText = "" }) { Icon(Icons.Default.Close, contentDescription = "Hapus pencarian") } }
+        )
+        TextButton(onClick = { sortMagnitude = !sortMagnitude }, modifier = Modifier.align(Alignment.End)) {
+            Icon(Icons.Default.Sort, contentDescription = null)
+            Spacer(Modifier.width(5.dp))
+            Text(if (sortMagnitude) "Magnitudo terbesar dahulu" else "Urutan waktu sumber")
+        }
+        Spacer(Modifier.height(4.dp))
         val source = when (filter) { "Dirasakan" -> felt; "Tsunami" -> tsunami; else -> quakes }
-        val shown = if (filter == "M ≥ 5.0") m5.filter { it.magnitudeValue >= 5.0 } else source
+        val base = if (filter == "M ≥ 5.0") m5.filter { it.magnitudeValue >= 5.0 } else source
+        val searched = base.filter { q ->
+            searchText.isBlank() || q.location.contains(searchText, ignoreCase = true) ||
+                q.coordinates.contains(searchText, ignoreCase = true) || q.magnitude.contains(searchText, ignoreCase = true)
+        }
+        val shown = if (sortMagnitude) searched.sortedByDescending { it.magnitudeValue } else searched
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
-            if (shown.isEmpty()) item { Text("Belum ada data pada kategori ini. Pembaruan berjalan otomatis tanpa memuat ulang halaman.", color = Muted, modifier = Modifier.padding(20.dp)) }
-            items(shown) { QuakeRow(it, card, fg) { open(it) } }
+            if (shown.isEmpty()) item {
+                Text(
+                    if (searchText.isNotBlank()) "Tidak ada kejadian yang cocok dengan pencarian." else "Belum ada data untuk kategori ini. Periksa koneksi atau coba perbarui data.",
+                    color = Muted, modifier = Modifier.padding(20.dp)
+                )
+            }
+            items(shown, key = { quakeKey(it) }) { QuakeRow(it, card, fg) { open(it) } }
         }
     }
 }
