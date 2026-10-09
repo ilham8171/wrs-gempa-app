@@ -485,9 +485,17 @@ private fun WrsGempaApp(
             val preferredLatest = (wrs.optJSONObject("official") ?: wrs.optJSONObject("latest"))?.let(::parseWrsQuake)
 
             val newLatest = bmkgLatest.firstOrNull() ?: preferredLatest ?: parsedRecent.firstOrNull() ?: latest
-            val newQuakes = (parsedRecent + bmkgLatest).distinctBy(::quakeKey)
-            val newM5 = bmkgM5.filter { it.magnitudeValue >= 5.0 }.distinctBy(::quakeKey)
-            val newFelt = (bmkgFelt + parsedRecent.filter { it.felt.isNotBlank() }).distinctBy(::quakeKey)
+            val fetchedQuakes = (parsedRecent + bmkgLatest).distinctBy(::quakeKey)
+            // Keep the last good category cache if an upstream feed is temporarily unavailable
+            // or returns an unusable empty result; never blank a working screen during polling.
+            val newQuakes = fetchedQuakes.ifEmpty { quakes }
+            val newM5 = if (feeds.m5.isSuccess && bmkgM5.isNotEmpty()) {
+                bmkgM5.filter { it.magnitudeValue >= 5.0 }.distinctBy(::quakeKey)
+            } else {
+                m5Quakes
+            }
+            val freshFelt = (bmkgFelt + parsedRecent.filter { it.felt.isNotBlank() }).distinctBy(::quakeKey)
+            val newFelt = if (feeds.felt.isSuccess && freshFelt.isNotEmpty()) freshFelt else feltQuakes
 
             val tsunamiJson = wrs.optJSONArray("tsunamiHistory") ?: JSONArray()
             val tsunamiItems = (0 until tsunamiJson.length()).mapNotNull { i ->
