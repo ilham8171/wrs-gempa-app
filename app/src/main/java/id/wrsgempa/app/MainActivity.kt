@@ -298,7 +298,12 @@ private fun quakeArray(root: JSONObject): List<Quake> {
     }
 }
 
-private fun quakeKey(q: Quake): String = listOf(q.date, q.time, q.magnitude, q.location, q.coordinates).joinToString("|")
+private fun quakeKey(q: Quake): String = if (q.warningEventId != null) {
+    listOf("InaTEWS", q.warningEventId, q.warningUpdatedAt.orEmpty().ifBlank { q.date + " " + q.time })
+        .joinToString("|")
+} else {
+    listOf(q.date, q.time, q.magnitude, q.location, q.coordinates).joinToString("|")
+}
 
 private fun quakeJson(q: Quake): JSONObject = JSONObject().apply {
     put("date", q.date)
@@ -399,7 +404,7 @@ private fun isTsunamiPotential(q: Quake): Boolean {
 }
 
 private fun latestTsunamiBulletins(items: List<Quake>): List<Quake> =
-    items.filter { it.source == "InaTEWS" }
+    items.filter { it.warningEventId != null }
         .groupBy { it.warningEventId?.takeIf(String::isNotBlank) ?: it.id.ifBlank { quakeKey(it) } }
         .values
         .mapNotNull { bulletins ->
@@ -583,7 +588,7 @@ private fun WrsGempaApp(
             quakes = newQuakes
             m5Quakes = newM5
             feltQuakes = newFelt
-            history = (listOfNotNull(newLatest) + newQuakes + newM5 + newFelt + tsunamiItems + history).distinctBy(::quakeKey).take(250)
+            history = (tsunamiItems + listOfNotNull(newLatest) + newM5 + newFelt + newQuakes + history).distinctBy(::quakeKey).take(250)
             saveHistory(prefs, history)
             lastUpdated = wibClockText()
             error = if (newLatest == null && newQuakes.isEmpty()) {
@@ -644,7 +649,7 @@ private fun WrsGempaApp(
                 when {
                     selected != null -> DetailPage(selected!!, fg, card, { selected = null }, padding)
                     subPage == 5 -> NearbyPage(quakes + listOfNotNull(latest), fg, card, padding, { selected = it })
-                    subPage == 6 -> TsunamiPage(latest, history.filter { it.source == "InaTEWS" }, fg, card, padding)
+                    subPage == 6 -> TsunamiPage(latest, history.filter { it.warningEventId != null }, fg, card, padding)
                     subPage == 7 -> InfoPage(fg, card, padding)
                     subPage == 8 -> HistoryPage(history, fg, card, padding, { selected = it })
                     subPage == 9 -> ShakeMapsPage(history.filter { it.shakemap.isNotBlank() }, fg, card, padding, { selected = it })
@@ -1183,8 +1188,9 @@ private fun ShakeMapsPage(items: List<Quake>, fg: Color, card: Color, padding: P
 private fun TsunamiPage(latest: Quake?, history: List<Quake>, fg: Color, card: Color, padding: PaddingValues) {
     val context = LocalContext.current
     var webView by remember { mutableStateOf<WebView?>(null) }
-    val activeBulletins = history.filter { it.warningEnded == false }
-    val endedBulletins = history.filter { it.warningEnded == true }
+    val newestBulletins = latestTsunamiBulletins(history)
+    val activeBulletins = newestBulletins.filter { it.warningEnded == false }
+    val endedBulletins = newestBulletins.filter { it.warningEnded == true }
     val statusPair = when {
         activeBulletins.isNotEmpty() -> "PERINGATAN BELUM DINYATAKAN BERAKHIR" to TsunamiRed
         history.isEmpty() -> "STATUS AKTIF BELUM TERVERIFIKASI" to Muted
@@ -1279,7 +1285,7 @@ private fun TsunamiPage(latest: Quake?, history: List<Quake>, fg: Color, card: C
                 }, modifier = Modifier.weight(1f)) { Icon(Icons.Default.SaveAlt, null); Spacer(Modifier.width(4.dp)); Text("Simpan peta") }
             }
             Spacer(Modifier.height(14.dp))
-            Text("Buletin InaTEWS di arsip lokal: ${history.size} • belum ditandai berakhir: ${activeBulletins.size} • ditandai berakhir: ${endedBulletins.size}. Status aktual selalu diverifikasi pada InaTEWS.", color = fg.copy(alpha = .65f), fontSize = 10.sp)
+            Text("Event buletin InaTEWS unik di cache: ${newestBulletins.size} • belum ditandai berakhir: ${activeBulletins.size} • ditandai berakhir: ${endedBulletins.size}. Status aktual selalu diverifikasi pada InaTEWS.", color = fg.copy(alpha = .65f), fontSize = 10.sp)
         }
     }
 }
