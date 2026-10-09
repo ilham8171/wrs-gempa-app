@@ -691,24 +691,11 @@ private fun Header(fg: Color, title: String, subtitle: String = "") {
 
 @Composable
 private fun HomePage(
-    latest: Quake?,
-    quakes: List<Quake>,
-    feltQuakes: List<Quake>,
-    m5Count: Int,
-    activeTsunamiWarning: Boolean,
-    loading: Boolean,
-    error: String,
-    lastUpdated: String,
-    fg: Color,
-    card: Color,
-    dark: Boolean,
-    toggleDark: () -> Unit,
-    refresh: () -> Unit,
-    open: (Quake) -> Unit,
-    openMap: () -> Unit,
-    openTsunami: () -> Unit,
-    openWeather: () -> Unit,
-    padding: PaddingValues
+    latest: Quake?, quakes: List<Quake>, feltQuakes: List<Quake>, m5Count: Int,
+    activeTsunamiWarning: Boolean, loading: Boolean, error: String, lastUpdated: String,
+    fg: Color, card: Color, dark: Boolean, toggleDark: () -> Unit, refresh: () -> Unit,
+    open: (Quake) -> Unit, openMap: () -> Unit, openTsunami: () -> Unit,
+    openWeather: () -> Unit, padding: PaddingValues
 ) {
     val context = LocalContext.current
     val weatherPrefs = remember(context) { context.getSharedPreferences("wrs_alerts", Context.MODE_PRIVATE) }
@@ -717,142 +704,168 @@ private fun HomePage(
     val weatherUpdatedAt = weatherPrefs.getLong("weather_cache_at", 0L)
     val weatherFresh = weatherUpdatedAt > 0L && System.currentTimeMillis() - weatherUpdatedAt < 6 * 60 * 60 * 1000L
     val nextWeather = weatherEntries.firstOrNull()
-    val tsunami = activeTsunamiWarning
-    LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Header(fg, "WRS GEMPA", "Realtime Earthquake & Tsunami Monitoring")
-                TextButton(onClick = toggleDark) { Text(if (dark) "Terang" else "Gelap") }
+                Column(Modifier.weight(1f)) {
+                    Text("WRS GEMPA", color = fg, fontSize = 25.sp, fontWeight = FontWeight.Black)
+                    Text("Pantau gempa dan cuaca Indonesia", color = fg.copy(alpha = .64f), fontSize = 12.sp)
+                }
+                Surface(color = Color(0xFFDDF7EA), shape = RoundedCornerShape(50)) {
+                    Row(Modifier.padding(horizontal = 10.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(7.dp).background(Color(0xFF15945E), CircleShape))
+                        Spacer(Modifier.width(6.dp))
+                        Text("LIVE", color = Color(0xFF11774A), fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
+                    }
+                }
+                IconButton(onClick = toggleDark) { Icon(if (dark) Icons.Default.LightMode else Icons.Default.DarkMode, "Ganti tema", tint = fg) }
             }
         }
         item {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Surface(color = Color(0xFFDDF7EA), shape = RoundedCornerShape(18.dp)) {
-                    Text("● LIVE BMKG", color = Color(0xFF11774A), fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp))
-                }
-                Column(Modifier.weight(1f)) {
-                    Text("JAM SEKARANG", color = fg.copy(alpha = .6f), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                    LiveWibClock(fg)
+            Card(colors = CardDefaults.cardColors(containerColor = Navy), shape = RoundedCornerShape(26.dp), modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(20.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("GEMPA TERKINI", color = Color(0xFFB9D4FF), fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
+                            Spacer(Modifier.height(8.dp))
+                            Text("M " + (latest?.magnitude ?: "—"), color = Color.White, fontSize = 38.sp, fontWeight = FontWeight.Black)
+                            Text(latest?.location ?: if (loading) "Mengambil data BMKG…" else "Data belum tersedia", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                        Box(Modifier.size(76.dp).background(Color(0x22FF5B63), CircleShape), contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.CrisisAlert, null, tint = Color(0xFFFF6970), modifier = Modifier.size(48.dp))
+                        }
+                    }
+                    Spacer(Modifier.height(14.dp))
+                    HorizontalDivider(color = Color.White.copy(alpha = .15f))
+                    Spacer(Modifier.height(12.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Schedule, null, tint = Color(0xFFB9D4FF), modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text((latest?.date ?: "Waktu menunggu") + " " + (latest?.time ?: ""), color = Color(0xFFDCE8FF), fontSize = 11.sp, modifier = Modifier.weight(1f))
+                        Text("Kedalaman " + (latest?.depth ?: "—"), color = Color(0xFFDCE8FF), fontSize = 10.sp)
+                    }
+                    Spacer(Modifier.height(14.dp))
+                    Button(onClick = { latest?.let(open) }, enabled = latest != null, modifier = Modifier.fillMaxWidth().height(46.dp), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Navy)) {
+                        Text("Lihat detail gempa", fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.width(8.dp))
+                        Icon(Icons.Default.ArrowForward, null, modifier = Modifier.size(17.dp))
+                    }
                 }
             }
-            Text("Sinkronisasi data berjalan diam-diam setiap 60 detik. Halaman dan peta tidak dimuat ulang otomatis.", color = fg.copy(alpha = .62f), fontSize = 10.sp)
+        }
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                StatCard("M ≥ 5", m5Count.toString(), "Katalog BMKG", card, fg, Modifier.weight(1f))
+                StatCard("Dirasakan", feltQuakes.size.toString(), "Katalog BMKG", card, fg, Modifier.weight(1f))
+                StatCard("Data masuk", lastUpdated, "Waktu WIB", card, fg, Modifier.weight(1f))
+            }
         }
         item {
             Card(colors = CardDefaults.cardColors(containerColor = card), shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth().clickable { openWeather() }) {
-                Column(Modifier.padding(16.dp)) {
+                Column(Modifier.padding(17.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(44.dp).background(Color(0xFFE2F1FF), RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) { Icon(Icons.Default.Cloud, null, tint = Blue, modifier = Modifier.size(26.dp)) }
+                        Box(Modifier.size(44.dp).background(Color(0xFFE5F2FF), RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) { Icon(Icons.Default.Cloud, null, tint = Blue, modifier = Modifier.size(27.dp)) }
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
-                            Text("CUACA BMKG", color = fg, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp)
-                            Text(weatherPlace ?: "Atur lokasi prakiraan cuaca", color = fg.copy(alpha = .68f), fontSize = 11.sp)
+                            Text("Cuaca BMKG", color = fg, fontWeight = FontWeight.ExtraBold, fontSize = 16.sp)
+                            Text(weatherPlace ?: "Pilih lokasi prakiraan", color = fg.copy(alpha = .62f), fontSize = 11.sp)
                         }
-                        Icon(Icons.Default.ChevronRight, "Buka cuaca", tint = fg.copy(alpha = .55f))
+                        Icon(Icons.Default.ChevronRight, null, tint = fg.copy(alpha = .6f))
                     }
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(14.dp))
                     if (nextWeather != null && weatherPlace != null) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.CloudQueue, null, tint = Blue, modifier = Modifier.size(42.dp)); Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
-                                Text(nextWeather.optString("weather_desc", "Kondisi cuaca"), color = fg, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                                Text("Periode " + nextWeather.optString("local_datetime", "berikutnya"), color = fg.copy(alpha = .65f), fontSize = 10.sp)
+                                Text(nextWeather.optString("weather_desc", "Prakiraan berikutnya"), color = fg, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                Text(nextWeather.optString("local_datetime", "Periode berikutnya"), color = fg.copy(alpha = .62f), fontSize = 11.sp)
+                                Spacer(Modifier.height(7.dp))
+                                Text("Kelembapan " + nextWeather.optString("hu", "—") + "% • Angin " + nextWeather.optString("ws", "—") + " km/j", color = fg.copy(alpha = .7f), fontSize = 10.sp)
                             }
-                            Text(nextWeather.optString("t", "—") + "°C", color = fg, fontSize = 25.sp, fontWeight = FontWeight.Black)
+                            Text(nextWeather.optString("t", "—") + "°", color = Blue, fontSize = 34.sp, fontWeight = FontWeight.Black)
                         }
-                        Spacer(Modifier.height(8.dp))
-                        Text("Kelembapan " + nextWeather.optString("hu", "—") + "%  •  Angin " + nextWeather.optString("ws", "—") + " km/j", color = fg.copy(alpha = .72f), fontSize = 11.sp)
-                        Text(if (weatherFresh) "Prakiraan tersimpan • diperbarui " + java.text.SimpleDateFormat("dd MMM, HH:mm", java.util.Locale("id", "ID")).format(java.util.Date(weatherUpdatedAt)) else "Menampilkan cache lama • ketuk untuk memperbarui", color = if (weatherFresh) Color(0xFF16845B) else Color(0xFFB7791F), fontSize = 10.sp, modifier = Modifier.padding(top = 6.dp))
+                        Text(if (weatherFresh) "Cache diperbarui " + java.text.SimpleDateFormat("dd MMM, HH:mm", java.util.Locale("id", "ID")).format(java.util.Date(weatherUpdatedAt)) else "Data tersimpan mungkin sudah lama — ketuk untuk cek", color = if (weatherFresh) Color(0xFF16845B) else Color(0xFFB7791F), fontSize = 10.sp, modifier = Modifier.padding(top = 8.dp))
                     } else {
-                        Text("Lihat prakiraan per periode dari BMKG. Pilih kode wilayah sekali, lalu ringkasan cuaca akan muncul di Beranda.", color = fg.copy(alpha = .78f), fontSize = 12.sp)
-                        Text("Atur lokasi cuaca →", color = Blue, fontWeight = FontWeight.Bold, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+                        Text("Lihat prakiraan cuaca resmi BMKG per periode. Pilih kode wilayah sekali agar ringkasan tampil di beranda.", color = fg.copy(alpha = .72f), fontSize = 12.sp)
+                        Text("Atur lokasi cuaca →", color = Blue, fontWeight = FontWeight.Bold, fontSize = 12.sp, modifier = Modifier.padding(top = 9.dp))
                     }
                 }
             }
         }
         item {
-            Card(colors = CardDefaults.cardColors(containerColor = Navy), shape = RoundedCornerShape(24.dp), modifier = Modifier.fillMaxWidth().clickable(enabled = latest != null) { latest?.let(open) }) {
-                Column(Modifier.padding(20.dp)) {
-                    Text("GEMPA TERBARU", color = Color(0xFFB9D4FF), fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(6.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(62.dp).background(Color(0x22FF5252), CircleShape), contentAlignment = Alignment.Center) {
-                            Icon(Icons.Default.CrisisAlert, null, tint = Color(0xFFFF6262), modifier = Modifier.size(36.dp))
-                        }
-                        Spacer(Modifier.width(14.dp))
-                        Column {
-                            Text("M " + (latest?.magnitude ?: "—"), color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Black)
-                            Text(latest?.location ?: if (loading) "Memuat BMKG…" else "Data belum tersedia", color = Color.White, fontWeight = FontWeight.SemiBold)
-                            Text((latest?.depth ?: "—") + " • " + (latest?.date ?: "") + " " + (latest?.time ?: ""), color = Color(0xFFB9D4FF), fontSize = 11.sp)
-                        }
+            Card(colors = CardDefaults.cardColors(containerColor = if (activeTsunamiWarning) TsunamiRed else card), shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth().clickable { openTsunami() }) {
+                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Warning, null, tint = if (activeTsunamiWarning) Color.White else Color(0xFFE29B21), modifier = Modifier.size(30.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(if (activeTsunamiWarning) "PERINGATAN TSUNAMI TERCATAT" else "Pusat Informasi Tsunami", color = if (activeTsunamiWarning) Color.White else fg, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
+                        Text(if (activeTsunamiWarning) "Buka rincian dan instruksi dari sumber peringatan." else "Periksa status dan riwayat peringatan resmi InaTEWS BMKG.", color = if (activeTsunamiWarning) Color.White.copy(alpha = .9f) else fg.copy(alpha = .68f), fontSize = 11.sp)
                     }
-                    Spacer(Modifier.height(10.dp))
-                    Text("Potensi pada kejadian: " + (latest?.tsunami?.takeIf { it.isNotBlank() && it != "—" } ?: "tidak tercantum"), color = Color(0xFFB9D4FF), fontSize = 12.sp)
-                    Text("Ketuk untuk detail lengkap →", color = Color.White.copy(alpha = .82f), fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp))
+                    Icon(Icons.Default.ChevronRight, null, tint = if (activeTsunamiWarning) Color.White else fg.copy(alpha = .55f))
                 }
             }
         }
-        if (tsunami) {
+        item {
+            Text("Akses cepat", color = fg, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp)
+            Text("Fitur utama dalam satu sentuhan", color = fg.copy(alpha = .62f), fontSize = 11.sp)
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                QuickAction(Icons.Default.Map, "Peta gempa", "Pantau lokasi", card, fg, Modifier.weight(1f), openMap)
+                QuickAction(Icons.Default.CloudQueue, "Prakiraan", "Cuaca BMKG", card, fg, Modifier.weight(1f), openWeather)
+                QuickAction(Icons.Default.NotificationsActive, "Peringatan", "Info tsunami", card, fg, Modifier.weight(1f), openTsunami)
+            }
+        }
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Gempa terbaru", color = fg, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp)
+                    Text("Data kejadian yang berhasil diterima", color = fg.copy(alpha = .62f), fontSize = 11.sp)
+                }
+                TextButton(onClick = openMap) { Text("Lihat peta") }
+            }
+        }
+        if (quakes.isEmpty() && latest == null && loading) {
             item {
-                Card(colors = CardDefaults.cardColors(containerColor = TsunamiRed), shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth().clickable { openTsunami() }) {
-                    Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Warning, null, tint = Color.White, modifier = Modifier.size(38.dp))
+                Card(colors = CardDefaults.cardColors(containerColor = card), shape = RoundedCornerShape(18.dp)) {
+                    Row(Modifier.fillMaxWidth().padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
                         Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text("POTENSI TSUNAMI", color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Black)
-                            Text("Fokus ke informasi resmi InaTEWS: peta, tinggi muka laut, wilayah terdampak, status peringatan.", color = Color.White.copy(alpha = .92f), fontSize = 12.sp)
-                        }
-                        Icon(Icons.Default.ChevronRight, null, tint = Color.White)
+                        Text("Menghubungkan ke sumber data gempa…", color = fg, fontSize = 12.sp)
+                    }
+                }
+            }
+        } else if (quakes.isEmpty() && latest == null) {
+            item {
+                Card(colors = CardDefaults.cardColors(containerColor = card), shape = RoundedCornerShape(18.dp)) {
+                    Column(Modifier.padding(18.dp)) {
+                        Text("Data belum dapat ditampilkan", color = fg, fontWeight = FontWeight.Bold)
+                        Text(error.ifBlank { "Periksa koneksi lalu coba perbarui data." }, color = fg.copy(alpha = .7f), fontSize = 12.sp)
                     }
                 }
             }
         } else {
-            item {
-                Card(colors = CardDefaults.cardColors(containerColor = card), shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth().clickable { openTsunami() }) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text("PERINGATAN TSUNAMI AKTIF", color = fg, fontWeight = FontWeight.Bold)
-                        Text("Belum ada peringatan aktif yang terverifikasi dari buletin tersimpan. Ini bukan jaminan tidak ada peringatan baru.", color = fg.copy(alpha = .8f), fontSize = 13.sp)
-                        Text("Periksa status resmi InaTEWS BMKG →", color = Blue, fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp))
-                    }
-                }
-            }
+            items(quakes.distinctBy(::quakeKey).take(5)) { q -> QuakeRow(q, card, fg) { open(q) } }
         }
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                StatCard("M 5+", m5Count.toString(), "Katalog BMKG", card, fg, Modifier.weight(1f))
-                StatCard("Dirasakan", feltQuakes.size.toString(), "Katalog BMKG", card, fg, Modifier.weight(1f))
-                StatCard("Update", lastUpdated, "WIB", card, fg, Modifier.weight(1f))
-            }
-        }
-        item {
-            Card(colors = CardDefaults.cardColors(containerColor = card), shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth().clickable { openMap() }) {
-                Column(Modifier.padding(16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Public, null, tint = Blue)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Realtime Monitoring Map", color = fg, fontWeight = FontWeight.Bold)
-                    }
-                    Spacer(Modifier.height(10.dp))
-                    Box(Modifier.fillMaxWidth().height(125.dp).background(Navy, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(Icons.Default.Map, null, tint = Color(0xFF72C6B2), modifier = Modifier.size(40.dp))
-                            Text("Peta interaktif realtime", color = Color.White, fontWeight = FontWeight.SemiBold)
-                            Text("Ketuk untuk membuka monitoring WRS GEMPA", color = Color(0xFFB9D4FF), fontSize = 10.sp)
-                        }
-                    }
-                }
-            }
-        }
-        item { Text("Gempa terbaru", color = fg, fontSize = 18.sp, fontWeight = FontWeight.Bold) }
-        items(quakes.take(5)) { q -> QuakeRow(q, card, fg) { open(q) } }
-        item {
-            Button(onClick = refresh, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(15.dp)) {
+            OutlinedButton(onClick = refresh, modifier = Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(14.dp)) {
                 Icon(Icons.Default.Refresh, null)
                 Spacer(Modifier.width(8.dp))
-                Text(if (loading) "Memperbarui BMKG…" else "Perbarui sekarang")
+                Text(if (loading) "Memperbarui data…" else "Perbarui data sekarang")
             }
             if (error.isNotBlank()) Text(error, color = Color(0xFFD32F2F), fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+            Text("Data mengikuti sumber yang berhasil diterima. Untuk keputusan keselamatan, utamakan pengumuman resmi BMKG.", color = fg.copy(alpha = .58f), fontSize = 10.sp, modifier = Modifier.padding(top = 12.dp))
         }
-        item { Text("Data terpadu WRS GEMPA • sumber kejadian ditampilkan sesuai data yang diterima. Untuk keselamatan, ikuti peringatan resmi.", color = fg.copy(alpha = .65f), fontSize = 11.sp) }
+    }
+}
+
+@Composable
+private fun QuickAction(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, subtitle: String, card: Color, fg: Color, modifier: Modifier, onClick: () -> Unit) {
+    Card(colors = CardDefaults.cardColors(containerColor = card), shape = RoundedCornerShape(18.dp), modifier = modifier.clickable(onClick = onClick)) {
+        Column(Modifier.fillMaxWidth().padding(12.dp)) {
+            Box(Modifier.size(38.dp).background(Color(0xFFE5F2FF), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) { Icon(icon, null, tint = Blue, modifier = Modifier.size(22.dp)) }
+            Spacer(Modifier.height(10.dp))
+            Text(title, color = fg, fontWeight = FontWeight.Bold, fontSize = 12.sp, maxLines = 1)
+            Text(subtitle, color = fg.copy(alpha = .62f), fontSize = 10.sp, maxLines = 1)
+        }
     }
 }
 
