@@ -391,8 +391,8 @@ private fun WrsGempaApp(
         val payloadHasValidEvent = !pending.getStringExtra("quake_time").isNullOrBlank() &&
             !pending.getStringExtra("quake_place").isNullOrBlank() &&
             pending.getStringExtra("quake_magnitude")?.replace(",", ".")?.toDoubleOrNull() != null &&
-            pending.getStringExtra("quake_latitude")?.toDoubleOrNull() in -90.0..90.0 &&
-            pending.getStringExtra("quake_longitude")?.toDoubleOrNull() in -180.0..180.0
+            (pending.getStringExtra("quake_latitude")?.toDoubleOrNull()?.let { it in -90.0..90.0 } == true) &&
+            (pending.getStringExtra("quake_longitude")?.toDoubleOrNull()?.let { it in -180.0..180.0 } == true)
         if (wantsTsunami && !payloadHasValidEvent) {
             selected = null
             tab = 4
