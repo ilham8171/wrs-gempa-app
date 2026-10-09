@@ -263,7 +263,8 @@ private fun WrsGempaApp() {
     var subPage by remember { mutableIntStateOf(-1) }
     var latest by remember { mutableStateOf<Quake?>(null) }
     var quakes by remember { mutableStateOf<List<Quake>>(emptyList()) }
-    var feltQuakes by remember { mutableStateOf<List<Quake>>(emptyList()) }\n    var m5Quakes by remember { mutableStateOf<List<Quake>>(emptyList()) }
+    var feltQuakes by remember { mutableStateOf<List<Quake>>(emptyList()) }
+    var m5Quakes by remember { mutableStateOf<List<Quake>>(emptyList()) }
     var history by remember { mutableStateOf(loadHistory(prefs)) }
     var selected by remember { mutableStateOf<Quake?>(null) }
     var loading by remember { mutableStateOf(false) }
