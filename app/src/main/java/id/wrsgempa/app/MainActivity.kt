@@ -419,6 +419,7 @@ private fun WrsGempaApp(
     var history by remember { mutableStateOf(loadHistory(prefs)) }
     var selected by remember { mutableStateOf<Quake?>(null) }
     var loading by remember { mutableStateOf(false) }
+    var refreshCompleted by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     var lastUpdated by remember { mutableStateOf("Belum diperbarui") }
     var filter by remember { mutableStateOf("Realtime") }
@@ -429,7 +430,7 @@ private fun WrsGempaApp(
     var minMagnitude by remember { mutableStateOf(prefs.getString("min_magnitude", "4.0") ?: "4.0") }
     var radius by remember { mutableStateOf(prefs.getString("radius", "200 km") ?: "200 km") }
 
-    LaunchedEffect(incomingIntent, latest, quakes, history) {
+    LaunchedEffect(incomingIntent, latest, quakes, feltQuakes, m5Quakes, history, loading, refreshCompleted) {
         val pending = incomingIntent ?: return@LaunchedEffect
         val eventId = pending.getStringExtra("quake_id").orEmpty()
         val wantsTsunami = pending.getBooleanExtra("open_tsunami_dashboard", false)
@@ -458,6 +459,19 @@ private fun WrsGempaApp(
             if (fromPayload != null) {
                 selected = fromPayload
                 subPage = -1
+                onIncomingIntentHandled()
+            } else if (refreshCompleted) {
+                // Event-only payloads may refer to records not retained in the local cache.
+                // Never leave a notification tap hanging on an unhandled intent.
+                if (wantsTsunami) {
+                    selected = null
+                    tab = 4
+                    subPage = 6
+                } else {
+                    selected = null
+                    tab = 2
+                    subPage = -1
+                }
                 onIncomingIntentHandled()
             }
         }
@@ -549,7 +563,7 @@ private fun WrsGempaApp(
             quakes = newQuakes
             m5Quakes = newM5
             feltQuakes = newFelt
-            history = (listOfNotNull(newLatest) + newQuakes + newFelt + tsunamiItems + history).distinctBy(::quakeKey).take(250)
+            history = (listOfNotNull(newLatest) + newQuakes + newM5 + newFelt + tsunamiItems + history).distinctBy(::quakeKey).take(250)
             saveHistory(prefs, history)
             lastUpdated = wibClockText()
             error = if (newLatest == null && newQuakes.isEmpty()) {
@@ -563,6 +577,7 @@ private fun WrsGempaApp(
                 error = "Data belum tersedia. Periksa koneksi internet lalu coba perbarui."
             }
         } finally {
+            refreshCompleted = true
             if (showProgress) loading = false
             refreshMutex.unlock()
         }
