@@ -818,7 +818,7 @@ private fun HomePage(
         }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                StatCard("M 5+", m5Count.toString(), "15 kejadian BMKG", card, fg, Modifier.weight(1f))
+                StatCard("M 5+", m5Count.toString(), "Katalog BMKG", card, fg, Modifier.weight(1f))
                 StatCard("Dirasakan", feltQuakes.size.toString(), "Katalog BMKG", card, fg, Modifier.weight(1f))
                 StatCard("Update", lastUpdated, "WIB", card, fg, Modifier.weight(1f))
             }
