@@ -119,6 +119,26 @@ private suspend fun fetchWrsData(): JSONObject = withContext(Dispatchers.IO) {
     } finally { connection.disconnect() }
 }
 
+private suspend fun fetchBmkgQuakes(fileName: String): List<Quake> = withContext(Dispatchers.IO) {
+    val url = URL("https://data.bmkg.go.id/DataMKG/TEWS/" + fileName + "?t=" + System.currentTimeMillis())
+    val connection = url.openConnection() as HttpURLConnection
+    connection.connectTimeout = 12000
+    connection.readTimeout = 15000
+    connection.setRequestProperty("User-Agent", "WRS-GEMPA-Android")
+    connection.setRequestProperty("Accept", "application/json")
+    connection.setRequestProperty("Cache-Control", "no-cache")
+    try {
+        if (connection.responseCode !in 200..299) error("BMKG HTTP " + connection.responseCode)
+        val root = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+        val value = root.optJSONObject("Infogempa")?.opt("gempa")
+        when (value) {
+            is JSONObject -> listOf(parseQuake(value))
+            is JSONArray -> (0 until value.length()).mapNotNull { i -> value.optJSONObject(i)?.let(::parseQuake) }
+            else -> emptyList()
+        }
+    } finally { connection.disconnect() }
+}
+
 private fun parseWrsQuake(obj: JSONObject): Quake? {
     val lat = obj.optDouble("lat", Double.NaN)
     val lon = obj.optDouble("lon", Double.NaN)
@@ -243,7 +263,7 @@ private fun WrsGempaApp() {
     var subPage by remember { mutableIntStateOf(-1) }
     var latest by remember { mutableStateOf<Quake?>(null) }
     var quakes by remember { mutableStateOf<List<Quake>>(emptyList()) }
-    var feltQuakes by remember { mutableStateOf<List<Quake>>(emptyList()) }
+    var feltQuakes by remember { mutableStateOf<List<Quake>>(emptyList()) }\n    var m5Quakes by remember { mutableStateOf<List<Quake>>(emptyList()) }
     var history by remember { mutableStateOf(loadHistory(prefs)) }
     var selected by remember { mutableStateOf<Quake?>(null) }
     var loading by remember { mutableStateOf(false) }
@@ -343,7 +363,7 @@ private fun WrsGempaApp() {
                     else -> when (tab) {
                         0 -> HomePage(latest, quakes, feltQuakes, loading, error, lastUpdated, fg, card, dark, { dark = !dark }, { refreshAction() }, { selected = it }, { tab = 1 }, { subPage = 6 }, padding)
                         1 -> MapPage(lastUpdated, fg, padding, { subPage = 8 }, { subPage = 9 })
-                        2 -> QuakeListPage(quakes, feltQuakes, history.filter(::isTsunamiPotential), filter, { filter = it }, fg, card, padding, { selected = it })
+                        2 -> QuakeListPage(quakes, feltQuakes, m5Quakes, history.filter(::isTsunamiPotential), filter, { filter = it }, fg, card, padding, { selected = it })
                         3 -> NotificationPage(latest, quakes, bigAlerts, { bigAlerts = it; prefs.edit().putBoolean("big_alerts", it).apply() }, feltAlerts, { feltAlerts = it; prefs.edit().putBoolean("felt_alerts", it).apply() }, tsunamiAlerts, { tsunamiAlerts = it; prefs.edit().putBoolean("tsunami_alerts", it).apply() }, nearbyAlerts, { nearbyAlerts = it; prefs.edit().putBoolean("nearby_alerts", it).apply() }, minMagnitude, { minMagnitude = it; prefs.edit().putString("min_magnitude", it).apply() }, radius, { radius = it; prefs.edit().putString("radius", it).apply() }, fg, card, padding, { selected = it })
                         else -> MorePage(fg, card, dark, { dark = !dark }, padding, { page -> subPage = page })
                     }
@@ -523,7 +543,7 @@ private fun QuakeRow(quake: Quake, card: Color, fg: Color, open: () -> Unit) {
 }
 
 @Composable
-private fun QuakeListPage(quakes: List<Quake>, felt: List<Quake>, tsunami: List<Quake>, filter: String, setFilter: (String) -> Unit, fg: Color, card: Color, padding: PaddingValues, open: (Quake) -> Unit) {
+private fun QuakeListPage(quakes: List<Quake>, felt: List<Quake>, m5: List<Quake>, tsunami: List<Quake>, filter: String, setFilter: (String) -> Unit, fg: Color, card: Color, padding: PaddingValues, open: (Quake) -> Unit) {
     Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 18.dp)) {
         Header(fg, "Informasi Gempa", "Data BMKG • semua waktu WIB")
         Spacer(Modifier.height(12.dp))
@@ -534,7 +554,7 @@ private fun QuakeListPage(quakes: List<Quake>, felt: List<Quake>, tsunami: List<
         }
         Spacer(Modifier.height(8.dp))
         val source = when (filter) { "Dirasakan" -> felt; "Tsunami" -> tsunami; else -> quakes }
-        val shown = if (filter == "M ≥ 5.0") quakes.filter { it.magnitudeValue >= 5.0 } else source
+        val shown = if (filter == "M ≥ 5.0") m5.filter { it.magnitudeValue >= 5.0 } else source
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
             if (shown.isEmpty()) item { Text("Belum ada data. Tarik layar dari atas atau tunggu update otomatis.", color = Muted, modifier = Modifier.padding(20.dp)) }
             items(shown) { QuakeRow(it, card, fg) { open(it) } }
