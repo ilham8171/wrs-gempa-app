@@ -337,13 +337,23 @@ private fun saveHistory(prefs: android.content.SharedPreferences, items: List<Qu
 }
 
 private fun isTsunamiPotential(q: Quake): Boolean {
-    val s = q.tsunami.lowercase()
-    return (s.contains("berpotensi tsunami") && !s.contains("tidak berpotensi tsunami")) || s.contains("warning tsunami") || s.contains("peringatan dini tsunami")
+    val s = q.tsunami.lowercase(java.util.Locale.ROOT)
+    val explicitlyNegative = s.contains("tidak berpotensi tsunami") ||
+        s.contains("tidak ada peringatan") || s.contains("no tsunami")
+    if (explicitlyNegative) return false
+    return (s.contains("berpotensi tsunami") || s.contains("warning tsunami") ||
+        s.contains("peringatan dini tsunami"))
 }
 
 private fun tsunamiStatus(q: Quake?): Pair<String, Color> {
     if (q == null) return "BELUM ADA DATA" to Muted
-    return if (isTsunamiPotential(q)) "POTENSI TSUNAMI" to TsunamiRed else "TIDAK ADA POTENSI TSUNAMI" to Color(0xFF147A51)
+    val sourceText = q.tsunami.trim()
+    if (sourceText.isBlank() || sourceText == "—") return "STATUS TIDAK TERSEDIA" to Muted
+    if (isTsunamiPotential(q)) return "POTENSI TSUNAMI" to TsunamiRed
+    if (sourceText.lowercase(java.util.Locale.ROOT).contains("tidak berpotensi tsunami")) {
+        return "TIDAK BERPOTENSI" to Color(0xFF147A51)
+    }
+    return "PERIKSA INaTEWS" to Muted
 }
 
 @OptIn(ExperimentalMaterialApi::class)
@@ -468,6 +478,7 @@ private fun WrsGempaApp(
                     put("depth", item.optString("depth", "—"))
                     put("time", eventTime)
                     put("potential", item.optString("headline", item.optString("subject", item.optString("potential", "Peringatan tsunami InaTEWS"))))
+                    put("source", "InaTEWS")
                     put("felt", item.optString("description", item.optString("instruction", "")))
                     put("shakemap", item.optString("shakemap", ""))
                 }
@@ -650,7 +661,7 @@ private fun HomePage(
                 Card(colors = CardDefaults.cardColors(containerColor = TsunamiYellow), shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth().clickable { openTsunami() }) {
                     Column(Modifier.padding(16.dp)) {
                         Text("STATUS TSUNAMI", color = Color(0xFF6B4B00), fontWeight = FontWeight.Bold)
-                        Text(latest?.tsunami ?: "Menunggu data BMKG", color = Color(0xFF5E5131), fontSize = 13.sp)
+                        Text(latest?.tsunami?.takeIf { it.isNotBlank() && it != "—" } ?: "Status tsunami tidak tercantum pada data kejadian ini. Periksa InaTEWS.", color = Color(0xFF5E5131), fontSize = 13.sp)
                         Text("Buka dashboard InaTEWS →", color = Color(0xFF7A5A00), fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp))
                     }
                 }
@@ -797,7 +808,8 @@ private fun MapPage(lastUpdated: String, fg: Color, padding: PaddingValues, open
 private fun DetailPage(quake: Quake, fg: Color, card: Color, back: () -> Unit, padding: PaddingValues) {
     val context = LocalContext.current
     var toast by remember { mutableStateOf("") }
-    val status = if (isTsunamiPotential(quake)) "POTENSI TSUNAMI" else "TIDAK ADA POTENSI TSUNAMI"
+    val statusPair = tsunamiStatus(quake)
+    val status = statusPair.first
     LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -850,7 +862,7 @@ private fun DetailPage(quake: Quake, fg: Color, card: Color, back: () -> Unit, p
                     DetailLine("Dirasakan", quake.felt.ifBlank { "Tidak ada data dirasakan" }, fg)
                     DetailLine("Potensi tsunami", quake.tsunami.ifBlank { "Tidak ada keterangan" }, fg)
                     DetailLine("Sumber data", quake.source, fg)
-                    Text(status, color = if (isTsunamiPotential(quake)) TsunamiRed else Color(0xFF147A51), fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(top = 8.dp))
+                    Text(status, color = statusPair.second, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(top = 8.dp))
                 }
             }
         }
@@ -1017,7 +1029,7 @@ private fun MorePage(fg: Color, card: Color, dark: Boolean, toggleDark: () -> Un
         item {
             Card(colors = CardDefaults.cardColors(containerColor = card), shape = RoundedCornerShape(18.dp)) {
                 Column(Modifier.padding(16.dp)) {
-                    Text("WRS GEMPA 1.4.0", color = fg, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+                    Text("WRS GEMPA 1.6.0", color = fg, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
                     Spacer(Modifier.height(6.dp))
                     Text("Monitoring gempa bumi, potensi tsunami, riwayat, ShakeMap, notifikasi, dan berbagi gambar informasi.", color = fg.copy(alpha = .75f), fontSize = 13.sp)
                     Spacer(Modifier.height(6.dp))
@@ -1048,7 +1060,7 @@ private fun HistoryPage(history: List<Quake>, fg: Color, card: Color, padding: P
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 FilterChip(selected = tab == 0, onClick = { tab = 0 }, label = { Text("Semua gempa") })
-                FilterChip(selected = tab == 1, onClick = { tab = 1 }, label = { Text("Riwayat tsunami") })
+                FilterChip(selected = tab == 1, onClick = { tab = 1 }, label = { Text("Potensi tsunami") })
             }
         }
         items(source) { QuakeRow(it, card, fg) { open(it) } }
@@ -1087,7 +1099,8 @@ private fun TsunamiPage(latest: Quake?, history: List<Quake>, fg: Color, card: C
         Column(Modifier.padding(18.dp)) {
             Header(fg, "Tsunami Dashboard", "Fokus peringatan dan dampak dari InaTEWS BMKG")
             Spacer(Modifier.height(12.dp))
-            Card(colors = CardDefaults.cardColors(containerColor = if (isTsunamiPotential(latest ?: Quake("", "", "0", "", "", "", 0.0, 0.0, ""))) Color(0xFFFFE8E8) else card), shape = RoundedCornerShape(22.dp)) {
+            val eventHasPotential = latest?.let(::isTsunamiPotential) == true
+            Card(colors = CardDefaults.cardColors(containerColor = if (eventHasPotential) Color(0xFFFFE8E8) else card), shape = RoundedCornerShape(22.dp)) {
                 Column(Modifier.padding(18.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Warning, null, tint = statusPair.second, modifier = Modifier.size(38.dp))
@@ -1151,7 +1164,7 @@ private fun TsunamiPage(latest: Quake?, history: List<Quake>, fg: Color, card: C
                 }, modifier = Modifier.weight(1f)) { Icon(Icons.Default.SaveAlt, null); Spacer(Modifier.width(4.dp)); Text("Simpan peta") }
             }
             Spacer(Modifier.height(14.dp))
-            Text("Riwayat tsunami tersimpan: " + history.size + " kejadian gempa terarsip lokal; yang berstatus potensi tsunami dapat dilihat di menu Riwayat.", color = fg.copy(alpha = .65f), fontSize = 10.sp)
+            Text("Arsip lokal: " + history.filter(::isTsunamiPotential).size + " kejadian dengan keterangan potensi/peringatan tsunami. Data ini bukan pengganti status peringatan aktif InaTEWS.", color = fg.copy(alpha = .65f), fontSize = 10.sp)
         }
     }
 }
