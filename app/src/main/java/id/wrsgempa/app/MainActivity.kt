@@ -843,17 +843,31 @@ private fun StatCard(title: String, value: String, subtitle: String, card: Color
 
 @Composable
 private fun QuakeRow(quake: Quake, card: Color, fg: Color, open: () -> Unit) {
-    Card(colors = CardDefaults.cardColors(containerColor = card), shape = RoundedCornerShape(15.dp), modifier = Modifier.fillMaxWidth().clickable(onClick = open)) {
+    val markerColor = when {
+        quake.magnitudeValue >= 5 -> Color(0xFFFF5555)
+        quake.magnitudeValue >= 4 -> Color(0xFFFFB52E)
+        else -> Color(0xFF49B78A)
+    }
+    val pulse = rememberInfiniteTransition(label = "quakeMarker")
+        .animateFloat(
+            initialValue = 0.45f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(1050, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "quakeMarkerAlpha"
+        )
+    Card(
+        colors = CardDefaults.cardColors(containerColor = card),
+        shape = RoundedCornerShape(17.dp),
+        modifier = Modifier.fillMaxWidth()
+            .animateContentSize(animationSpec = tween(220, easing = FastOutSlowInEasing))
+            .clickable(onClick = open)
+    ) {
         Row(Modifier.padding(13.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(
-                Modifier.size(10.dp).background(
-                    when {
-                        quake.magnitudeValue >= 5 -> Color(0xFFFF5555)
-                        quake.magnitudeValue >= 4 -> Color(0xFFFFB52E)
-                        else -> Color(0xFF49B78A)
-                    },
-                    CircleShape
-                )
+                Modifier.size(11.dp).background(markerColor.copy(alpha = pulse.value), CircleShape)
             )
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
