@@ -5,6 +5,8 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.RingtoneManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -58,13 +60,39 @@ class WrsFirebaseMessagingService : FirebaseMessagingService() {
     private fun showNotification(title: String, body: String, data: Map<String, String>) {
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            manager.createNotificationChannel(
-                NotificationChannel(CHANNEL_ID, "Peringatan WRS GEMPA", NotificationManager.IMPORTANCE_HIGH).apply {
-                    description = "Peringatan gempa dan tsunami dari WRS GEMPA"
-                }
-            )
+            if (manager.getNotificationChannel(QUAKE_CHANNEL_ID) == null) {
+                manager.createNotificationChannel(
+                    NotificationChannel(QUAKE_CHANNEL_ID, "Notifikasi Gempa", NotificationManager.IMPORTANCE_HIGH).apply {
+                        description = "Pembaruan gempa dari WRS GEMPA"
+                        enableVibration(true)
+                        vibrationPattern = longArrayOf(0, 250, 120, 250)
+                    }
+                )
+            }
+            if (manager.getNotificationChannel(TSUNAMI_CHANNEL_ID) == null) {
+                manager.createNotificationChannel(
+                    NotificationChannel(TSUNAMI_CHANNEL_ID, "Peringatan Tsunami", NotificationManager.IMPORTANCE_HIGH).apply {
+                        description = "Peringatan tsunami. Ikuti instruksi resmi BMKG/InaTEWS."
+                        enableVibration(true)
+                        vibrationPattern = longArrayOf(0, 500, 200, 500, 200, 900)
+                        setSound(
+                            RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM),
+                            AudioAttributes.Builder()
+                                .setUsage(AudioAttributes.USAGE_ALARM)
+                                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                                .build()
+                        )
+                    }
+                )
+            }
         }
 
+        val category = first(data, "category", "type").lowercase(Locale.ROOT)
+        val tsunamiAlert = category.contains("tsunami") ||
+            title.lowercase(Locale.ROOT).contains("tsunami") ||
+            body.lowercase(Locale.ROOT).contains("peringatan dini tsunami") ||
+            body.lowercase(Locale.ROOT).contains("warning tsunami")
+        val channelId = if (tsunamiAlert) TSUNAMI_CHANNEL_ID else QUAKE_CHANNEL_ID
         val eventId = first(data, "quake_id", "event_id", "eventId", "eventid", "key", "id", "fingerprint")
         val openApp = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
@@ -94,7 +122,7 @@ class WrsFirebaseMessagingService : FirebaseMessagingService() {
             PendingIntent.FLAG_UPDATE_CURRENT or
                 (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
         )
-        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+        val notification = NotificationCompat.Builder(this, channelId)
             .setSmallIcon(android.R.drawable.ic_dialog_alert)
             .setContentTitle(title)
             .setContentText(body)
@@ -120,6 +148,7 @@ class WrsFirebaseMessagingService : FirebaseMessagingService() {
 
     companion object {
         private const val TOPIC = "wrs-gempa-alerts"
-        private const val CHANNEL_ID = "wrs_gempa_fcm"
+        private const val QUAKE_CHANNEL_ID = "wrs_gempa_fcm_v2"
+        private const val TSUNAMI_CHANNEL_ID = "wrs_tsunami_fcm_v2"
     }
 }
