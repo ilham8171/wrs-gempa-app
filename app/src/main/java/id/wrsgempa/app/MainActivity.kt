@@ -1124,19 +1124,27 @@ private fun ShakeMapsPage(items: List<Quake>, fg: Color, card: Color, padding: P
 private fun TsunamiPage(latest: Quake?, history: List<Quake>, fg: Color, card: Color, padding: PaddingValues) {
     val context = LocalContext.current
     var webView by remember { mutableStateOf<WebView?>(null) }
-    val statusPair = tsunamiStatus(latest)
+    val activeBulletins = history.filter { it.warningEnded == false }
+    val endedBulletins = history.filter { it.warningEnded == true }
+    val statusPair = when {
+        activeBulletins.isNotEmpty() -> "PERINGATAN BELUM DINYATAKAN BERAKHIR" to TsunamiRed
+        history.isEmpty() -> "STATUS AKTIF BELUM TERVERIFIKASI" to Muted
+        else -> "BUKA INATEWS UNTUK STATUS TERKINI" to Muted
+    }
     val statusText = statusPair.first
-    val detail = if (latest != null) {
-        "Gempa: M " + latest.magnitude + " • " + latest.location + " • " + latest.depth + ". Status BMKG: " + latest.tsunami
-    } else {
-        "Belum ada parameter gempa terbaru dari BMKG."
+    val detail = when {
+        activeBulletins.isNotEmpty() ->
+            "${activeBulletins.size} buletin InaTEWS pada data tersimpan belum ditandai berakhir. Ini perlu segera diverifikasi pada halaman resmi; status dari arsip tidak selalu sama dengan status saat ini."
+        history.isEmpty() ->
+            "Belum ada buletin tsunami InaTEWS yang tersedia di arsip perangkat. Status peringatan aktif belum dapat dipastikan dari data gempa terbaru saja."
+        else ->
+            "${endedBulletins.size} buletin InaTEWS pada arsip ditandai berakhir. Hal ini bukan jaminan tidak ada peringatan baru; periksa halaman resmi untuk status terkini."
     }
     Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState())) {
         Column(Modifier.padding(18.dp)) {
             Header(fg, "Tsunami Dashboard", "Fokus peringatan dan dampak dari InaTEWS BMKG")
             Spacer(Modifier.height(12.dp))
-            val eventHasPotential = latest?.let(::isTsunamiPotential) == true
-            Card(colors = CardDefaults.cardColors(containerColor = if (eventHasPotential) Color(0xFFFFE8E8) else card), shape = RoundedCornerShape(22.dp)) {
+            Card(colors = CardDefaults.cardColors(containerColor = if (activeBulletins.isNotEmpty()) Color(0xFFFFE8E8) else card), shape = RoundedCornerShape(22.dp)) {
                 Column(Modifier.padding(18.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Warning, null, tint = statusPair.second, modifier = Modifier.size(38.dp))
@@ -1161,6 +1169,18 @@ private fun TsunamiPage(latest: Quake?, history: List<Quake>, fg: Color, card: C
                         }, modifier = Modifier.weight(1f)) {
                             Icon(Icons.Default.SaveAlt, null); Spacer(Modifier.width(4.dp)); Text("Simpan")
                         }
+                    }
+                }
+            }
+            if (latest != null) {
+                Spacer(Modifier.height(10.dp))
+                Card(colors = CardDefaults.cardColors(containerColor = card), shape = RoundedCornerShape(16.dp)) {
+                    Column(Modifier.padding(14.dp)) {
+                        Text("Gempa terbaru (bukan status peringatan aktif)", color = fg, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Spacer(Modifier.height(6.dp))
+                        DetailLine("Kejadian", "M ${latest.magnitude} • ${latest.location}", fg)
+                        DetailLine("Waktu", "${latest.date} • ${latest.time}", fg)
+                        DetailLine("Keterangan potensi pada kejadian", latest.tsunami.ifBlank { "Tidak tercantum; periksa InaTEWS." }, fg)
                     }
                 }
             }
@@ -1200,7 +1220,7 @@ private fun TsunamiPage(latest: Quake?, history: List<Quake>, fg: Color, card: C
                 }, modifier = Modifier.weight(1f)) { Icon(Icons.Default.SaveAlt, null); Spacer(Modifier.width(4.dp)); Text("Simpan peta") }
             }
             Spacer(Modifier.height(14.dp))
-            Text("Arsip lokal: " + history.filter(::isTsunamiPotential).size + " kejadian dengan keterangan potensi/peringatan tsunami. Data ini bukan pengganti status peringatan aktif InaTEWS.", color = fg.copy(alpha = .65f), fontSize = 10.sp)
+            Text("Buletin InaTEWS di arsip lokal: ${history.size} • belum ditandai berakhir: ${activeBulletins.size} • ditandai berakhir: ${endedBulletins.size}. Status aktual selalu diverifikasi pada InaTEWS.", color = fg.copy(alpha = .65f), fontSize = 10.sp)
         }
     }
 }
