@@ -15,8 +15,23 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
+      - name: Run unit tests
+        run: gradle testDebugUnitTest
       - name: Build debug APK
         run: gradle assembleDebug
+      - name: Verify APK and enforce 500 MB maximum
+        shell: bash
+        run: |
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$APK"
+          SIZE_BYTES="$(stat -c '%s' "$APK")"
+          MAX_BYTES=$((500 * 1024 * 1024))
+          echo "APK size: $((SIZE_BYTES / 1024 / 1024)) MiB"
+          if [ "$SIZE_BYTES" -gt "$MAX_BYTES" ]; then
+            echo "APK exceeds the 500 MiB limit."
+            exit 1
+          fi
+          sha256sum "$APK"
       - uses: actions/upload-artifact@v4
         with:
           name: wrs-gempa-debug-apk
