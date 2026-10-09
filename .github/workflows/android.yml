@@ -2,7 +2,7 @@ name: Build Android APK
 on:
   workflow_dispatch:
   push:
-    branches: [main, feature/full-earthquake-categories]
+    branches: [main, feature/full-earthquake-categories, feature/weather-gps-complete]
 # Keep only the newest APK build for each branch; stale pushes do not waste runner time.
 concurrency:
   group: android-apk-${{ github.ref }}
