@@ -164,8 +164,10 @@ class EarthquakeWorker(context: Context, params: WorkerParameters) : CoroutineWo
                     val item = tsunamiList.optJSONObject(i) ?: continue
                     if (item.optBoolean("ended", false)) continue
                     val text = (item.optString("subject") + " " + item.optString("headline") + " " + item.optString("potential")).lowercase(Locale.ROOT)
-                    val explicitlyNegative = text.contains("tidak berpotensi tsunami") || text.contains("no tsunami")
-                    val confirmedWarning = text.contains("warning tsunami") || text.contains("peringatan dini tsunami")
+                    val explicitlyNegative = text.contains("tidak berpotensi tsunami") ||
+                        text.contains("tidak ada peringatan") || text.contains("no tsunami")
+                    val confirmedWarning = !explicitlyNegative &&
+                        (text.contains("warning tsunami") || text.contains("peringatan dini tsunami"))
                     val positivePotential = text.contains("berpotensi tsunami") && !explicitlyNegative
                     if (confirmedWarning || positivePotential) {
                         val fp = fingerprint(item)
