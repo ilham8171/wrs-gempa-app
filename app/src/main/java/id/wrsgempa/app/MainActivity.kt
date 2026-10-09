@@ -20,6 +20,12 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.Canvas
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -653,9 +659,10 @@ private fun WrsGempaApp(
                     subPage == 7 -> InfoPage(fg, card, padding)
                     subPage == 8 -> HistoryPage(history, fg, card, padding, { selected = it })
                     subPage == 9 -> ShakeMapsPage(history.filter { it.shakemap.isNotBlank() }, fg, card, padding, { selected = it })
+                    subPage == 10 -> WeatherPage(fg, card, padding, prefs)
                     else -> when (tab) {
                         0 -> HomePage(latest, quakes, feltQuakes, m5Quakes.size, loading, error, lastUpdated, fg, card, dark, { dark = !dark }, { refreshAction() }, { selected = it }, { tab = 1 }, { subPage = 6 }, padding)
-                        1 -> MapPage(lastUpdated, fg, padding, { subPage = 8 }, { subPage = 9 })
+                        1 -> MapPage(lastUpdated, quakes + listOfNotNull(latest), fg, card, padding, { subPage = 8 }, { subPage = 9 }, { subPage = 10 })
                         2 -> QuakeListPage(quakes, feltQuakes, m5Quakes, history.filter(::isTsunamiPotential), filter, { filter = it }, fg, card, padding, { selected = it })
                         3 -> NotificationPage(latest, quakes, bigAlerts, { bigAlerts = it; prefs.edit().putBoolean("big_alerts", it).apply() }, feltAlerts, { feltAlerts = it; prefs.edit().putBoolean("felt_alerts", it).apply() }, tsunamiAlerts, { tsunamiAlerts = it; prefs.edit().putBoolean("tsunami_alerts", it).apply() }, nearbyAlerts, { nearbyAlerts = it; prefs.edit().putBoolean("nearby_alerts", it).apply() }, minMagnitude, { minMagnitude = it; prefs.edit().putString("min_magnitude", it).apply() }, radius, { radius = it; prefs.edit().putString("radius", it).apply() }, fg, card, padding, { selected = it })
                         else -> MorePage(fg, card, dark, { dark = !dark }, padding, { page -> subPage = page })
@@ -737,7 +744,7 @@ private fun HomePage(
                         }
                     }
                     Spacer(Modifier.height(10.dp))
-                    Text(latest?.tsunami ?: "Belum ada informasi potensi tsunami", color = Color(0xFFB9D4FF), fontSize = 12.sp)
+                    Text("Potensi pada kejadian: " + (latest?.tsunami?.takeIf { it.isNotBlank() && it != "—" } ?: "tidak tercantum"), color = Color(0xFFB9D4FF), fontSize = 12.sp)
                     Text("Ketuk untuk detail lengkap →", color = Color.White.copy(alpha = .82f), fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp))
                 }
             }
@@ -758,11 +765,11 @@ private fun HomePage(
             }
         } else {
             item {
-                Card(colors = CardDefaults.cardColors(containerColor = TsunamiYellow), shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth().clickable { openTsunami() }) {
+                Card(colors = CardDefaults.cardColors(containerColor = card), shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth().clickable { openTsunami() }) {
                     Column(Modifier.padding(16.dp)) {
-                        Text("STATUS TSUNAMI", color = Color(0xFF6B4B00), fontWeight = FontWeight.Bold)
-                        Text(latest?.tsunami?.takeIf { it.isNotBlank() && it != "—" } ?: "Status tsunami tidak tercantum pada data kejadian ini. Periksa InaTEWS.", color = Color(0xFF5E5131), fontSize = 13.sp)
-                        Text("Buka dashboard InaTEWS →", color = Color(0xFF7A5A00), fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp))
+                        Text("PERINGATAN TSUNAMI AKTIF", color = fg, fontWeight = FontWeight.Bold)
+                        Text("Belum ada peringatan aktif yang terverifikasi dari buletin tersimpan. Ini bukan jaminan tidak ada peringatan baru.", color = fg.copy(alpha = .8f), fontSize = 13.sp)
+                        Text("Periksa status resmi InaTEWS BMKG →", color = Blue, fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp))
                     }
                 }
             }
@@ -863,44 +870,56 @@ private fun QuakeListPage(quakes: List<Quake>, felt: List<Quake>, m5: List<Quake
     }
 }
 
-@SuppressLint("SetJavaScriptEnabled")
 @Composable
-private fun MapPage(lastUpdated: String, fg: Color, padding: PaddingValues, openHistory: () -> Unit, openShakemap: () -> Unit) {
+private fun MapPage(lastUpdated: String, quakes: List<Quake>, fg: Color, card: Color, padding: PaddingValues, openHistory: () -> Unit, openShakemap: () -> Unit, openWeather: () -> Unit) {
+    val pulse = rememberInfiniteTransition(label = "quake-pulse")
+    val scale by pulse.animateFloat(1f, 2.5f, infiniteRepeatable(tween(1500), RepeatMode.Restart), label = "pulse-scale")
+    val alpha by pulse.animateFloat(.65f, .04f, infiniteRepeatable(tween(1500), RepeatMode.Restart), label = "pulse-alpha")
     Column(Modifier.fillMaxSize().padding(padding)) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-            Header(fg, "Monitoring Gempa Realtime", "Peta langsung dari WRS GEMPA milikmu")
+            Header(fg, "Monitoring Gempa Realtime", "Peta native • data kejadian tersinkron")
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(color = Color(0xFFDDF7EA), shape = RoundedCornerShape(20.dp)) {
                     Text("LIVE • WRS GEMPA", color = Color(0xFF11774A), fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp))
                 }
                 Spacer(Modifier.width(8.dp))
-                Column {
-                    Text("Jam sekarang", color = fg.copy(alpha = .6f), fontSize = 9.sp)
-                    LiveWibClock(fg)
-                    Text("Data terakhir: " + lastUpdated + " WIB", color = fg.copy(alpha = .68f), fontSize = 10.sp)
+                Column { LiveWibClock(fg); Text("Data terakhir: $lastUpdated WIB", color = fg.copy(alpha = .68f), fontSize = 10.sp) }
+            }
+        }
+        Row(Modifier.padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+            OutlinedButton(onClick = openHistory, modifier = Modifier.weight(1f)) { Icon(Icons.Default.History, null); Text("Riwayat", fontSize = 10.sp) }
+            OutlinedButton(onClick = openShakemap, modifier = Modifier.weight(1f)) { Icon(Icons.Default.Image, null); Text("ShakeMaps", fontSize = 10.sp) }
+            OutlinedButton(onClick = openWeather, modifier = Modifier.weight(1f)) { Icon(Icons.Default.Cloud, null); Text("Cuaca", fontSize = 10.sp) }
+        }
+        Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF071B31)), shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth().weight(1f).padding(12.dp)) {
+            Box(Modifier.fillMaxSize()) {
+                Canvas(Modifier.fillMaxSize()) {
+                    val w = size.width; val h = size.height
+                    val c = drawContext.canvas.nativeCanvas
+                    val p = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.argb(30,100,190,220); strokeWidth = 1f }
+                    for (i in 1..7) { c.drawLine(w*i/8f,0f,w*i/8f,h,p); c.drawLine(0f,h*i/8f,w,h*i/8f,p) }
+                    p.color = android.graphics.Color.argb(75,51,153,132)
+                    listOf(floatArrayOf(.08f,.38f,.32f,.07f),floatArrayOf(.36f,.52f,.28f,.04f),floatArrayOf(.66f,.36f,.13f,.07f),floatArrayOf(.72f,.62f,.16f,.08f),floatArrayOf(.43f,.72f,.13f,.04f),floatArrayOf(.88f,.78f,.07f,.1f)).forEach { v -> c.drawOval(w*v[0],h*v[1],w*(v[0]+v[2]),h*(v[1]+v[3]),p) }
+                    quakes.filter { it.latitude in -12.0..8.0 && it.longitude in 94.0..142.0 }.take(100).forEachIndexed { i,q ->
+                        val x=((q.longitude-94.0)/48.0*w).toFloat(); val y=((8.0-q.latitude)/20.0*h).toFloat()
+                        if(i==0) { p.color=android.graphics.Color.argb((alpha*255).toInt().coerceIn(0,255),255,40,50); c.drawCircle(x,y,7f*scale,p) }
+                        p.color=android.graphics.Color.rgb(255,55,65); c.drawCircle(x,y,if(i==0) 7f else 4f,p)
+                        p.color=android.graphics.Color.WHITE; c.drawCircle(x,y,1.5f,p)
+                    }
+                }
+                Column(Modifier.align(Alignment.TopStart).padding(14.dp)) {
+                    Text("INDONESIA • MONITORING", color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 12.sp)
+                    Text("Titik merah = lokasi kejadian gempa", color = Color(0xFFB9D4FF), fontSize = 10.sp)
+                }
+                Surface(Modifier.align(Alignment.BottomStart).padding(12.dp), color = Color(0xDD0A1730), shape = RoundedCornerShape(12.dp)) {
+                    Column(Modifier.padding(10.dp)) {
+                        Text("Kejadian terpetakan: ${quakes.count { it.latitude in -12.0..8.0 && it.longitude in 94.0..142.0 }}", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("Skema orientasi, bukan peta navigasi presisi.", color = Color(0xFFB9D4FF), fontSize = 9.sp)
+                    }
                 }
             }
         }
-        Row(Modifier.padding(horizontal = 14.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = openHistory, modifier = Modifier.weight(1f)) { Icon(Icons.Default.History, null); Spacer(Modifier.width(4.dp)); Text("Riwayat") }
-            OutlinedButton(onClick = openShakemap, modifier = Modifier.weight(1f)) { Icon(Icons.Default.Image, null); Spacer(Modifier.width(4.dp)); Text("ShakeMaps") }
-        }
-        Spacer(Modifier.height(8.dp))
-        AndroidView(
-            modifier = Modifier.weight(1f).fillMaxWidth(),
-            factory = { ctx ->
-                WebView(ctx).apply {
-                    webViewClient = WebViewClient()
-                    settings.javaScriptEnabled = true
-                    settings.domStorageEnabled = true
-                    settings.loadWithOverviewMode = true
-                    settings.useWideViewPort = true
-                    settings.builtInZoomControls = false
-                    loadUrl("https://wrsgempa.netlify.app/")
-                }
-            }
-        )
-        Text("Monitoring WRS GEMPA • Data dari backend Netlify milikmu", color = fg.copy(alpha = .55f), fontSize = 9.sp, modifier = Modifier.padding(8.dp))
+        Text("Data kejadian WRS GEMPA/BMKG. Untuk keputusan keselamatan, ikuti pengumuman resmi BMKG.", color = fg.copy(alpha = .65f), fontSize = 10.sp, modifier = Modifier.padding(12.dp))
     }
 }
 
@@ -1121,6 +1140,7 @@ private fun MorePage(fg: Color, card: Color, dark: Boolean, toggleDark: () -> Un
                     SettingsRow(Icons.Default.History, "Riwayat", "Kejadian tersimpan lokal", fg) { navigate(8) }
                     SettingsRow(Icons.Default.Image, "ShakeMaps", "Peta guncangan BMKG", fg) { navigate(9) }
                     SettingsRow(Icons.Default.Warning, "Dashboard tsunami", "InaTEWS + status", fg) { navigate(6) }
+                    SettingsRow(Icons.Default.Cloud, "Cuaca BMKG", "Prakiraan resmi", fg) { navigate(10) }
                     SettingsRow(Icons.Default.LocationOn, "Sekitar saya", "Jarak dari perangkat", fg) { navigate(5) }
                     SettingsRow(Icons.Default.Info, "Informasi", "Sumber dan peringatan", fg) { navigate(7) }
                 }
@@ -1289,6 +1309,117 @@ private fun TsunamiPage(latest: Quake?, history: List<Quake>, fg: Color, card: C
         }
     }
 }
+
+@Composable
+private fun WeatherPage(fg: Color, card: Color, padding: PaddingValues, prefs: android.content.SharedPreferences) {
+    var code by remember { mutableStateOf(prefs.getString("weather_adm4", "") ?: "") }
+    var place by remember { mutableStateOf(prefs.getString("weather_place", "") ?: "") }
+    var entries by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
+    var warning by remember { mutableStateOf("Peringatan dini belum diperiksa.") }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf("") }
+    var updated by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+    val ctx = LocalContext.current
+    LaunchedEffect(Unit) {
+        runCatching {
+            val arr = JSONArray(prefs.getString("weather_cache", "[]"))
+            entries = (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }
+            if (entries.isNotEmpty()) updated = "Cache lokal • bukan data live"
+        }
+    }
+    LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item { Header(fg, "Cuaca BMKG", "Prakiraan resmi dan peringatan dini") }
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = card), shape = RoundedCornerShape(18.dp)) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("Kode wilayah adm4", color = fg, fontWeight = FontWeight.Bold)
+                    Text("Masukkan kode desa/kelurahan BMKG 10 digit agar lokasi tidak ditebak.", color = fg.copy(alpha=.7f), fontSize=11.sp)
+                    OutlinedTextField(value=code,onValueChange={code=it.filter(Char::isDigit).take(10)},label={Text("Kode adm4 (10 digit)")},singleLine=true,modifier=Modifier.fillMaxWidth())
+                    Button(enabled=!busy,onClick={
+                        if(!Regex("^\\d{10}$").matches(code)) { error="Kode adm4 harus terdiri dari 10 digit."; return@Button }
+                        busy=true; error=""
+                        scope.launch {
+                            try {
+                                val result=withContext(Dispatchers.IO) {
+                                    val c=URL("https://api.bmkg.go.id/publik/prakiraan-cuaca?adm4=$code").openConnection() as HttpURLConnection
+                                    c.connectTimeout=10000;c.readTimeout=12000
+                                    val root=JSONObject(c.inputStream.bufferedReader().use{it.readText()});c.disconnect()
+                                    val loc=root.optJSONObject("lokasi")
+                                    val name=listOf("desa","kecamatan","kotkab","provinsi").map{loc?.optString(it).orEmpty()}.filter{it.isNotBlank()&&it!="null"}.distinct().joinToString(", ")
+                                    val out=mutableListOf<JSONObject>(); val data=root.optJSONArray("data")
+                                    for(i in 0 until (data?.length()?:0)) {
+                                        val groups=data?.optJSONObject(i)?.optJSONArray("cuaca")?:continue
+                                        for(j in 0 until groups.length()) {
+                                            val group=groups.optJSONArray(j)
+                                            if(group!=null) for(k in 0 until group.length()) group.optJSONObject(k)?.let{out.add(it)}
+                                        }
+                                    }
+                                    name to out.distinctBy{it.optString("local_datetime")}.take(24)
+                                }
+                                place=result.first.ifBlank{"Kode wilayah $code"}; entries=result.second
+                                if(entries.isEmpty()) error="Respons BMKG tidak berisi periode prakiraan untuk kode tersebut."
+                                else {
+                                    prefs.edit().putString("weather_adm4",code).putString("weather_place",place).putString("weather_cache",JSONArray().apply{entries.forEach{put(it)}}.toString()).putLong("weather_cache_at",System.currentTimeMillis()).apply()
+                                    updated=java.text.SimpleDateFormat("dd MMM HH:mm",java.util.Locale("id","ID")).format(java.util.Date())
+                                }
+                                warning=withContext(Dispatchers.IO) {
+                                    runCatching {
+                                        val c=URL("https://www.bmkg.go.id/alerts/nowcast/id").openConnection() as HttpURLConnection
+                                        c.connectTimeout=8000;c.readTimeout=8000
+                                        val body=c.inputStream.bufferedReader().use{it.readText()};c.disconnect()
+                                        val n=Regex("<alert(?:\\s|>)",RegexOption.IGNORE_CASE).findAll(body).count()
+                                        if(n>0) "Feed resmi memuat $n buletin. Buka BMKG untuk melihat wilayah terdampak dan masa berlaku."
+                                        else "Feed berhasil diperiksa; tidak terdeteksi buletin dalam respons. Periksa laman BMKG untuk status terkini."
+                                    }.getOrElse{"Feed peringatan tidak dapat diakses. Ini tidak berarti tidak ada peringatan."}
+                                }
+                            } catch(e:Exception) { error="Gagal memuat data BMKG. Periksa koneksi dan kode wilayah."; }
+                            finally { busy=false }
+                        }
+                    },modifier=Modifier.fillMaxWidth().padding(top=8.dp)) {
+                        if(busy) CircularProgressIndicator(Modifier.size(18.dp),strokeWidth=2.dp) else Icon(Icons.Default.CloudDownload,null)
+                        Spacer(Modifier.width(8.dp));Text(if(busy)"Memuat…" else "Ambil prakiraan BMKG")
+                    }
+                    if(error.isNotBlank()) Text(error,color=Color(0xFFD32F2F),fontSize=12.sp,modifier=Modifier.padding(top=6.dp))
+                }
+            }
+        }
+        if(place.isNotBlank()) item {
+            Card(colors=CardDefaults.cardColors(containerColor=Navy),shape=RoundedCornerShape(18.dp)) {
+                Column(Modifier.padding(16.dp)) {
+                    Text(place,color=Color.White,fontSize=18.sp,fontWeight=FontWeight.ExtraBold)
+                    Text(updated,color=Color(0xFFB9D4FF),fontSize=11.sp)
+                }
+            }
+        }
+        item {
+            Card(colors=CardDefaults.cardColors(containerColor=card),shape=RoundedCornerShape(18.dp)) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("Peringatan dini cuaca BMKG",color=fg,fontWeight=FontWeight.Bold)
+                    Text(warning,color=fg.copy(alpha=.8f),fontSize=12.sp,modifier=Modifier.padding(top=5.dp))
+                    TextButton(onClick={runCatching{ctx.startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://www.bmkg.go.id/alerts/nowcast/id")))}}){Text("Buka laman resmi BMKG")}
+                }
+            }
+        }
+        item { Text("Prakiraan per periode (maksimal 24 entri)",color=fg,fontWeight=FontWeight.Bold,fontSize=16.sp) }
+        items(entries) { p ->
+            Card(colors=CardDefaults.cardColors(containerColor=card),shape=RoundedCornerShape(16.dp)) {
+                Row(Modifier.fillMaxWidth().padding(14.dp),verticalAlignment=Alignment.CenterVertically) {
+                    Icon(Icons.Default.Cloud,tint=Blue,contentDescription=null,modifier=Modifier.size(30.dp));Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(p.optString("local_datetime","—"),color=fg,fontWeight=FontWeight.Bold,fontSize=12.sp)
+                        Text(p.optString("weather_desc","Kondisi tidak tersedia"),color=fg,fontSize=14.sp)
+                        Text("Angin ${p.optString("ws","—")} km/j • ${p.optString("wd","—")} • Kelembapan ${p.optString("hu","—")}%",color=fg.copy(alpha=.65f),fontSize=10.sp)
+                    }
+                    Text("${p.optString("t","—")}°C",color=fg,fontSize=20.sp,fontWeight=FontWeight.ExtraBold)
+                }
+            }
+        }
+        if(entries.isEmpty()) item { Text("Belum ada prakiraan. Masukkan kode adm4 lalu ambil data resmi BMKG.",color=fg.copy(alpha=.7f)) }
+        item { Text("Sumber: BMKG. Data cache diberi label; prakiraan bukan pengganti peringatan darurat.",color=fg.copy(alpha=.65f),fontSize=10.sp) }
+    }
+}
+
 
 @Composable
 private fun NearbyPage(quakes: List<Quake>, fg: Color, card: Color, padding: PaddingValues, open: (Quake) -> Unit) {
