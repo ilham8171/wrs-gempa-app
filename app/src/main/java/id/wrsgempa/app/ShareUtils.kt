@@ -113,8 +113,10 @@ object ShareUtils {
         }
 
         paint.color = 0xFF0A1730.toInt()
-        c.drawRect(0f, height - 78f, width.toFloat(), height.toFloat(), paint)
-        c.drawText("WRS GEMPA  •  Sumber: " + quake.source, 34f, height - 30f, textPaint(20f, true, 0xFFFFFFFF.toInt()))
+        c.drawRect(0f, height - 126f, width.toFloat(), height.toFloat(), paint)
+        c.drawText("WRS GEMPA  •  © Powered by Ilham", 34f, height - 88f, textPaint(22f, true, 0xFFFFFFFF.toInt()))
+        c.drawText("Sumber resmi: BMKG data.bmkg.go.id/gempabumi", 34f, height - 57f, textPaint(17f, true, 0xFFD8E6FF.toInt()))
+        c.drawText("Status tsunami: InaTEWS BMKG • inatews.bmkg.go.id", 34f, height - 28f, textPaint(17f, true, 0xFFD8E6FF.toInt()))
         return bitmap
     }
 
@@ -143,8 +145,10 @@ object ShareUtils {
         drawWrapped(c, "Peta perkiraan tinggi muka laut, wilayah berpotensi terdampak, dan status peringatan ditampilkan dari InaTEWS BMKG pada halaman Tsunami di aplikasi.", 78f, y + 98f, textPaint(20f), 930f, 6f)
 
         paint.color = 0xFF0A1730.toInt()
-        c.drawRect(0f, height - 86f, width.toFloat(), height.toFloat(), paint)
-        c.drawText("WRS GEMPA  •  InaTEWS BMKG", 48f, height - 36f, textPaint(21f, true, 0xFFFFFFFF.toInt()))
+        c.drawRect(0f, height - 126f, width.toFloat(), height.toFloat(), paint)
+        c.drawText("WRS GEMPA  •  © Powered by Ilham", 48f, height - 88f, textPaint(22f, true, 0xFFFFFFFF.toInt()))
+        c.drawText("Sumber resmi: BMKG • data.bmkg.go.id/gempabumi", 48f, height - 57f, textPaint(17f, true, 0xFFD8E6FF.toInt()))
+        c.drawText("InaTEWS BMKG • inatews.bmkg.go.id", 48f, height - 28f, textPaint(17f, true, 0xFFD8E6FF.toInt()))
         return bitmap
     }
 
