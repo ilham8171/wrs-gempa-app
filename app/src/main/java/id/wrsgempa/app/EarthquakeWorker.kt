@@ -129,6 +129,8 @@ class EarthquakeWorker(context: Context, params: WorkerParameters) : CoroutineWo
                 if (felt.isNotBlank()) putExtra("quake_felt", felt)
                 val shakemap = event.optString("shakemap", event.optString("Shakemap", ""))
                 if (shakemap.isNotBlank()) putExtra("quake_shakemap", shakemap)
+                val source = event.optString("source", event.optString("status", "WRS GEMPA"))
+                if (source.isNotBlank()) putExtra("quake_source", source)
             }
             if (alert.openTsunamiDashboard) putExtra("open_tsunami_dashboard", true)
         }
