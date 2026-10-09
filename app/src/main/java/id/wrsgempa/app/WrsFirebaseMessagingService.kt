@@ -11,11 +11,13 @@ import androidx.core.app.NotificationManagerCompat
 import com.google.firebase.messaging.FirebaseMessaging
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
+import org.json.JSONObject
+import java.util.Locale
 
 /**
- * Receives FCM messages and joins the WRS GEMPA broadcast topic.
- * The backend must send FCM messages to topic "wrs-gempa-alerts"
- * for cloud push notifications to reach subscribed devices.
+ * Receives WRS GEMPA push messages. When a payload contains event parameters,
+ * tapping its notification opens that earthquake detail; warning-only pushes
+ * open the official tsunami dashboard instead.
  */
 class WrsFirebaseMessagingService : FirebaseMessagingService() {
     override fun onCreate() {
@@ -32,17 +34,28 @@ class WrsFirebaseMessagingService : FirebaseMessagingService() {
 
     override fun onMessageReceived(message: RemoteMessage) {
         super.onMessageReceived(message)
+        val data = message.data.toMutableMap()
+        // Some senders package event fields into one JSON-valued data key.
+        data["quake"]?.let { raw ->
+            runCatching {
+                val objectData = JSONObject(raw)
+                objectData.keys().forEach { key ->
+                    if (!data.containsKey(key)) data[key] = objectData.optString(key)
+                }
+            }
+        }
+
         val title = message.notification?.title
-            ?: message.data["title"]
+            ?: data["title"]
             ?: "Peringatan WRS GEMPA"
         val body = message.notification?.body
-            ?: message.data["body"]
-            ?: message.data["message"]
+            ?: data["body"]
+            ?: data["message"]
             ?: "Ada pembaruan informasi gempa. Buka WRS GEMPA untuk melihat detail."
-        showNotification(title, body)
+        showNotification(title, body, data)
     }
 
-    private fun showNotification(title: String, body: String) {
+    private fun showNotification(title: String, body: String, data: Map<String, String>) {
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             manager.createNotificationChannel(
@@ -51,11 +64,32 @@ class WrsFirebaseMessagingService : FirebaseMessagingService() {
                 }
             )
         }
+
+        val eventId = first(data, "quake_id", "event_id", "eventId", "eventid", "key", "id", "fingerprint")
         val openApp = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            if (eventId.isNotBlank()) putExtra("quake_id", eventId)
+            copyExtra(this, data, "quake_time", "time", "DateTime", "datetime", "timestamp")
+            copyExtra(this, data, "quake_magnitude", "magnitude", "Magnitude", "mag")
+            copyExtra(this, data, "quake_place", "place", "location", "Wilayah", "wilayah")
+            copyExtra(this, data, "quake_latitude", "lat", "latitude")
+            copyExtra(this, data, "quake_longitude", "lon", "longitude")
+            copyExtra(this, data, "quake_depth", "depth", "Kedalaman")
+            copyExtra(this, data, "quake_potential", "potential", "Potensi", "headline")
+            copyExtra(this, data, "quake_felt", "felt", "Dirasakan")
+            copyExtra(this, data, "quake_shakemap", "shakemap", "Shakemap")
+
+            val category = first(data, "category", "type").lowercase(Locale.ROOT)
+            val tsunamiAlert = category.contains("tsunami") ||
+                title.lowercase(Locale.ROOT).contains("tsunami") ||
+                body.lowercase(Locale.ROOT).contains("peringatan tsunami")
+            if (tsunamiAlert && eventId.isBlank()) putExtra("open_tsunami_dashboard", true)
         }
+
         val pendingIntent = PendingIntent.getActivity(
-            this, 7301, openApp,
+            this,
+            eventId.hashCode().let { if (it == 0) 7301 else it },
+            openApp,
             PendingIntent.FLAG_UPDATE_CURRENT or
                 (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
         )
@@ -69,10 +103,18 @@ class WrsFirebaseMessagingService : FirebaseMessagingService() {
             .setContentIntent(pendingIntent)
             .build()
         try {
-            NotificationManagerCompat.from(this).notify((System.currentTimeMillis() % Int.MAX_VALUE).toInt(), notification)
+            val notificationId = if (eventId.isNotBlank()) eventId.hashCode() else (System.currentTimeMillis() % Int.MAX_VALUE).toInt()
+            NotificationManagerCompat.from(this).notify(notificationId, notification)
         } catch (_: SecurityException) {
             // Android 13+: notification permission has not been granted.
         }
+    }
+
+    private fun first(data: Map<String, String>, vararg keys: String): String =
+        keys.firstNotNullOfOrNull { key -> data[key]?.takeIf { it.isNotBlank() } }.orEmpty()
+
+    private fun copyExtra(intent: Intent, data: Map<String, String>, target: String, vararg keys: String) {
+        first(data, *keys).takeIf { it.isNotBlank() }?.let { intent.putExtra(target, it) }
     }
 
     companion object {
