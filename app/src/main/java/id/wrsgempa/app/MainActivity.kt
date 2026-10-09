@@ -107,6 +107,13 @@ data class Quake(
     val magnitudeValue: Double get() = magnitude.replace(",", ".").toDoubleOrNull() ?: 0.0
 }
 
+private data class FeedResults(
+    val wrs: Result<JSONObject>,
+    val latest: Result<List<Quake>>,
+    val m5: Result<List<Quake>>,
+    val felt: Result<List<Quake>>
+)
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -317,56 +324,104 @@ private fun WrsGempaApp() {
     var minMagnitude by remember { mutableStateOf(prefs.getString("min_magnitude", "4.0") ?: "4.0") }
     var radius by remember { mutableStateOf(prefs.getString("radius", "200 km") ?: "200 km") }
 
-    suspend fun refresh() {
-        loading = true
-        error = ""
-        try {
-            val wrs = fetchWrsData()
-            val recentJson = wrs.optJSONArray("recent") ?: JSONArray()
-            val parsedRecent = (0 until recentJson.length()).mapNotNull { i -> recentJson.optJSONObject(i)?.let(::parseWrsQuake) }
+    val refreshMutex = remember { Mutex() }
 
-            // BMKG's public feeds are authoritative for latest, M5+, and felt categories.
-            // Keep the existing WRS endpoint as a resilient secondary source.
-            val bmkgLatest = runCatching { fetchBmkgQuakes("autogempa.json") }.getOrDefault(emptyList())
-            val bmkgM5 = runCatching { fetchBmkgQuakes("gempaterkini.json") }.getOrDefault(emptyList())
-            val bmkgFelt = runCatching { fetchBmkgQuakes("gempadirasakan.json") }.getOrDefault(emptyList())
+    suspend fun refresh(showProgress: Boolean = false) {
+        if (!refreshMutex.tryLock()) return
+        if (showProgress) {
+            loading = true
+            error = ""
+        }
+        try {
+            // Fetch official and backend sources in parallel. Netlify outages must not block BMKG.
+            val feeds = coroutineScope {
+                val wrsTask = async { runCatching { fetchWrsData() } }
+                val latestTask = async { runCatching { fetchBmkgQuakes("autogempa.json") } }
+                val m5Task = async { runCatching { fetchBmkgQuakes("gempaterkini.json") } }
+                val feltTask = async { runCatching { fetchBmkgQuakes("gempadirasakan.json") } }
+                FeedResults(wrsTask.await(), latestTask.await(), m5Task.await(), feltTask.await())
+            }
+            if (!feeds.wrs.isSuccess && !feeds.latest.isSuccess && !feeds.m5.isSuccess && !feeds.felt.isSuccess) {
+                // Retain last good content; only show the error when there is nothing cached.
+                if (latest == null && quakes.isEmpty()) {
+                    error = "Data belum tersedia. Periksa koneksi internet lalu coba perbarui."
+                }
+                return
+            }
+
+            val wrs = feeds.wrs.getOrNull() ?: JSONObject()
+            val recentJson = wrs.optJSONArray("recent") ?: JSONArray()
+            val parsedRecent = (0 until recentJson.length()).mapNotNull { i ->
+                recentJson.optJSONObject(i)?.let(::parseWrsQuake)
+            }
+
+            val bmkgLatest = feeds.latest.getOrDefault(emptyList())
+            val bmkgM5 = feeds.m5.getOrDefault(emptyList())
+            val bmkgFelt = feeds.felt.getOrDefault(emptyList())
             val preferredLatest = (wrs.optJSONObject("official") ?: wrs.optJSONObject("latest"))?.let(::parseWrsQuake)
-            latest = bmkgLatest.firstOrNull() ?: preferredLatest ?: parsedRecent.firstOrNull()
-            quakes = (bmkgLatest + parsedRecent).distinctBy(::quakeKey)
-            m5Quakes = bmkgM5.filter { it.magnitudeValue >= 5.0 }.distinctBy(::quakeKey)
-            feltQuakes = (bmkgFelt + parsedRecent.filter { it.felt.isNotBlank() }).distinctBy(::quakeKey)
+
+            val newLatest = bmkgLatest.firstOrNull() ?: preferredLatest ?: parsedRecent.firstOrNull() ?: latest
+            val newQuakes = (parsedRecent + bmkgLatest).distinctBy(::quakeKey)
+            val newM5 = bmkgM5.filter { it.magnitudeValue >= 5.0 }.distinctBy(::quakeKey)
+            val newFelt = (bmkgFelt + parsedRecent.filter { it.felt.isNotBlank() }).distinctBy(::quakeKey)
+
             val tsunamiJson = wrs.optJSONArray("tsunamiHistory") ?: JSONArray()
             val tsunamiItems = (0 until tsunamiJson.length()).mapNotNull { i ->
                 val item = tsunamiJson.optJSONObject(i) ?: return@mapNotNull null
+                val latitude = item.optDouble("lat", Double.NaN)
+                val longitude = item.optDouble("lon", Double.NaN)
+                val magnitude = item.optDouble("magnitude", Double.NaN)
+                val eventTime = item.optString("time", item.optString("timesent", "")).trim()
+
+                // Alert-only records without valid quake parameters belong to the tsunami dashboard,
+                // not the earthquake archive (avoids phantom M0 entries or invented coordinates).
+                if (!latitude.isFinite() || !longitude.isFinite() || !magnitude.isFinite() ||
+                    latitude !in -90.0..90.0 || longitude !in -180.0..180.0 || eventTime.isBlank()) {
+                    return@mapNotNull null
+                }
                 val normalized = JSONObject().apply {
                     put("key", item.optString("key", item.optString("eventid", "tsunami-" + i)))
-                    put("magnitude", item.optDouble("magnitude", 0.0))
-                    put("lat", item.optDouble("lat", Double.NaN))
-                    put("lon", item.optDouble("lon", Double.NaN))
+                    put("magnitude", magnitude)
+                    put("lat", latitude)
+                    put("lon", longitude)
                     put("place", item.optString("place", "Wilayah peringatan tsunami"))
                     put("depth", item.optString("depth", "—"))
-                    put("time", item.optString("time", item.optString("timesent", "")))
+                    put("time", eventTime)
                     put("potential", item.optString("headline", item.optString("subject", item.optString("potential", "Peringatan tsunami InaTEWS"))))
                     put("felt", item.optString("description", item.optString("instruction", "")))
                     put("shakemap", item.optString("shakemap", ""))
                 }
                 parseWrsQuake(normalized)
             }
-            history = (listOfNotNull(latest) + quakes + feltQuakes + tsunamiItems + history).distinctBy(::quakeKey).take(250)
+
+            latest = newLatest
+            quakes = newQuakes
+            m5Quakes = newM5
+            feltQuakes = newFelt
+            history = (listOfNotNull(newLatest) + newQuakes + newFelt + tsunamiItems + history).distinctBy(::quakeKey).take(250)
             saveHistory(prefs, history)
-            lastUpdated = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale("id", "ID")).apply { timeZone = java.util.TimeZone.getTimeZone("Asia/Jakarta") }.format(java.util.Date())
+            lastUpdated = wibClockText()
+            error = if (newLatest == null && newQuakes.isEmpty()) {
+                "Feed berhasil dihubungi, tetapi belum ada data gempa yang valid."
+            } else {
+                ""
+            }
         } catch (_: Exception) {
-            error = "Data WRS GEMPA belum dapat dimuat. Periksa koneksi dan endpoint Netlify."
+            // A temporary network or parsing issue must never clear the last successful content.
+            if (latest == null && quakes.isEmpty()) {
+                error = "Data belum tersedia. Periksa koneksi internet lalu coba perbarui."
+            }
         } finally {
-            loading = false
+            if (showProgress) loading = false
+            refreshMutex.unlock()
         }
     }
 
     LaunchedEffect(Unit) {
-        refresh()
+        refresh(showProgress = true)
         while (true) {
             delay(60_000L)
-            refresh()
+            refresh(showProgress = false)
         }
     }
 
