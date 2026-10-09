@@ -78,6 +78,7 @@ class WrsFirebaseMessagingService : FirebaseMessagingService() {
             copyExtra(this, data, "quake_potential", "potential", "Potensi", "headline")
             copyExtra(this, data, "quake_felt", "felt", "Dirasakan")
             copyExtra(this, data, "quake_shakemap", "shakemap", "Shakemap")
+            copyExtra(this, data, "quake_source", "source", "status")
 
             val category = first(data, "category", "type").lowercase(Locale.ROOT)
             val tsunamiAlert = category.contains("tsunami") ||
