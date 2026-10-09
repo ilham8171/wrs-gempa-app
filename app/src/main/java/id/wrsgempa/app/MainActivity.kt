@@ -706,21 +706,21 @@ private fun HomePage(
     LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Header(fg, "WRS GEMPA", "Realtime Earthquake & Tsunami Monitoring")
+                Header(fg, "WRS GEMPA", "Pantau Gempa • Tsunami • Cuaca Indonesia")
                 TextButton(onClick = toggleDark) { Text(if (dark) "Terang" else "Gelap") }
             }
         }
         item {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Surface(color = Color(0xFFDDF7EA), shape = RoundedCornerShape(18.dp)) {
-                    Text("● LIVE BMKG", color = Color(0xFF11774A), fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp))
+                    Text("● DATA BMKG", color = Color(0xFF11774A), fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp))
                 }
                 Column(Modifier.weight(1f)) {
-                    Text("JAM SEKARANG", color = fg.copy(alpha = .6f), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    Text("WAKTU INDONESIA BARAT", color = fg.copy(alpha = .6f), fontSize = 9.sp, fontWeight = FontWeight.Bold)
                     LiveWibClock(fg)
                 }
             }
-            Text("Sinkronisasi data berjalan diam-diam setiap 60 detik. Halaman dan peta tidak dimuat ulang otomatis.", color = fg.copy(alpha = .62f), fontSize = 10.sp)
+            Text("Pembaruan otomatis berjalan di latar belakang sesuai koneksi dan layanan sumber data. Waktu pembaruan ditampilkan agar status data jelas.", color = fg.copy(alpha = .62f), fontSize = 10.sp)
         }
         item {
             Card(colors = CardDefaults.cardColors(containerColor = Navy), shape = RoundedCornerShape(24.dp), modifier = Modifier.fillMaxWidth().clickable(enabled = latest != null) { latest?.let(open) }) {
