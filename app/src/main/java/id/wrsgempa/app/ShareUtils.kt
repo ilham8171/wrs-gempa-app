@@ -85,7 +85,7 @@ object ShareUtils {
         field("Lokasi", quake.location)
         field("Koordinat", quake.coordinates)
         field("Kedalaman", quake.depth)
-        field("Sumber", "BMKG")
+        field("Sumber", quake.source)
         if (quake.felt.isNotBlank()) field("Dirasakan", quake.felt)
         field("Potensi", quake.tsunami)
 
@@ -104,7 +104,7 @@ object ShareUtils {
 
         paint.color = 0xFF0A1730.toInt()
         c.drawRect(0f, height - 78f, width.toFloat(), height.toFloat(), paint)
-        c.drawText("WRS GEMPA  •  Sumber data resmi BMKG", 34f, height - 30f, textPaint(20f, true, 0xFFFFFFFF.toInt()))
+        c.drawText("WRS GEMPA  •  Sumber: " + quake.source, 34f, height - 30f, textPaint(20f, true, 0xFFFFFFFF.toInt()))
         return bitmap
     }
 
