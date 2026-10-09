@@ -1360,42 +1360,66 @@ private fun TsunamiPage(latest: Quake?, history: List<Quake>, fg: Color, card: C
                 }
             }
             Spacer(Modifier.height(12.dp))
-            Text("Peta resmi InaTEWS", color = fg, fontWeight = FontWeight.Bold, fontSize = 17.sp)
-            Text("Di bawah ini memuat halaman resmi yang menampilkan peta perkiraan tinggi muka laut maksimum, wilayah yang berpotensi tsunami, dan status/saran peringatan ketika event tersedia.", color = fg.copy(alpha = .7f), fontSize = 11.sp)
-            Spacer(Modifier.height(8.dp))
-        }
-        AndroidView(
-            modifier = Modifier.fillMaxWidth().height(620.dp),
-            factory = { ctx ->
-                WebView(ctx).apply {
-                    webView = this
-                    webViewClient = WebViewClient()
-                    settings.javaScriptEnabled = true
-                    settings.domStorageEnabled = true
-                    settings.useWideViewPort = true
-                    settings.loadWithOverviewMode = true
-                    loadUrl("https://inatews.bmkg.go.id/web/tsunami")
+            Text("Informasi tsunami", color = fg, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+            Text(
+                "Ringkasan berikut berasal dari catatan peringatan yang tersedia di aplikasi. Status aktif tidak boleh disimpulkan hanya dari arsip; verifikasi pengumuman resmi sebelum mengambil keputusan keselamatan.",
+                color = fg.copy(alpha = .72f), fontSize = 12.sp
+            )
+            Spacer(Modifier.height(10.dp))
+            if (newestBulletins.isEmpty()) {
+                Card(colors = CardDefaults.cardColors(containerColor = card), shape = RoundedCornerShape(18.dp)) {
+                    Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Info, null, tint = Muted, modifier = Modifier.size(28.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Column {
+                            Text("Belum ada buletin tsunami di cache", color = fg, fontWeight = FontWeight.Bold)
+                            Text("Aplikasi belum dapat memastikan apakah ada peringatan aktif. Periksa kanal resmi InaTEWS/BMKG.", color = fg.copy(alpha = .7f), fontSize = 12.sp)
+                        }
+                    }
+                }
+            } else {
+                newestBulletins.forEach { bulletin ->
+                    val ended = bulletin.warningEnded == true
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = if (ended) card else Color(0xFFFFF1F0)),
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(Modifier.padding(14.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    if (ended) Icons.Default.CheckCircle else Icons.Default.Warning,
+                                    contentDescription = null,
+                                    tint = if (ended) Color(0xFF16804A) else TsunamiRed
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    if (ended) "Buletin ditandai berakhir" else "Buletin perlu diverifikasi",
+                                    color = if (ended) fg else TsunamiRed,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Spacer(Modifier.height(6.dp))
+                            Text("M ${bulletin.magnitude} • ${bulletin.location}", color = fg, fontWeight = FontWeight.SemiBold)
+                            Text("${bulletin.date} • ${bulletin.time} • Kedalaman ${bulletin.depth}", color = fg.copy(alpha = .7f), fontSize = 11.sp)
+                            if (bulletin.tsunami.isNotBlank()) Text(bulletin.tsunami, color = fg, fontSize = 12.sp, modifier = Modifier.padding(top = 5.dp))
+                        }
+                    }
                 }
             }
-        )
-        Column(Modifier.padding(18.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = {
-                    webView?.let {
-                        val b = ShareUtils.captureView(it)
-                        if (b != null) ShareUtils.shareBitmap(context, b, "wrs_tsunami_map", "Bagikan peta tsunami", "Peta tsunami • WRS GEMPA\nInformasi peta resmi InaTEWS yang dimuat dalam aplikasi.")
-                    }
-                }, modifier = Modifier.weight(1f)) { Icon(Icons.Default.Share, null); Spacer(Modifier.width(4.dp)); Text("Bagikan peta") }
-                OutlinedButton(onClick = {
-                    webView?.let {
-                        val b = ShareUtils.captureView(it)
-                        val ok = b != null && ShareUtils.saveBitmap(context, b, "inatews_tsunami")
-                        Toast.makeText(context, if (ok) "Peta disimpan" else "Gagal menyimpan peta", Toast.LENGTH_SHORT).show()
-                    }
-                }, modifier = Modifier.weight(1f)) { Icon(Icons.Default.SaveAlt, null); Spacer(Modifier.width(4.dp)); Text("Simpan peta") }
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://inatews.bmkg.go.id/web/tsunami"))) } },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Default.OpenInBrowser, null)
+                Spacer(Modifier.width(8.dp))
+                Text("Verifikasi status di InaTEWS resmi")
             }
-            Spacer(Modifier.height(14.dp))
-            Text("Event buletin InaTEWS unik di cache: ${newestBulletins.size} • belum ditandai berakhir: ${activeBulletins.size} • ditandai berakhir: ${endedBulletins.size}. Status aktual selalu diverifikasi pada InaTEWS.", color = fg.copy(alpha = .65f), fontSize = 10.sp)
+            Text(
+                "Sumber informasi: BMKG/InaTEWS dan data yang tersimpan di perangkat. Ringkasan aplikasi bukan pengganti instruksi evakuasi resmi.",
+                color = fg.copy(alpha = .62f), fontSize = 10.sp
+            )
         }
     }
 }
