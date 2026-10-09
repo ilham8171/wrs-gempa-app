@@ -115,9 +115,11 @@ class WrsFirebaseMessagingService : FirebaseMessagingService() {
             if (tsunamiAlert && eventId.isBlank()) putExtra("open_tsunami_dashboard", true)
         }
 
+        val notificationKey = channelId + "|" + if (eventId.isNotBlank()) eventId else System.currentTimeMillis().toString()
+        val notificationId = notificationKey.hashCode().let { if (it == 0) 7301 else it }
         val pendingIntent = PendingIntent.getActivity(
             this,
-            eventId.hashCode().let { if (it == 0) 7301 else it },
+            notificationId,
             openApp,
             PendingIntent.FLAG_UPDATE_CURRENT or
                 (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
@@ -132,7 +134,6 @@ class WrsFirebaseMessagingService : FirebaseMessagingService() {
             .setContentIntent(pendingIntent)
             .build()
         try {
-            val notificationId = if (eventId.isNotBlank()) eventId.hashCode() else (System.currentTimeMillis() % Int.MAX_VALUE).toInt()
             NotificationManagerCompat.from(this).notify(notificationId, notification)
         } catch (_: SecurityException) {
             // Android 13+: notification permission has not been granted.
