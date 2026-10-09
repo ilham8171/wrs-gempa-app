@@ -115,8 +115,11 @@ private data class FeedResults(
 )
 
 class MainActivity : ComponentActivity() {
+    private val incomingNotificationIntent = mutableStateOf<Intent?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        incomingNotificationIntent.value = intent.takeIf(::hasNotificationRoute)
         FirebaseMessaging.getInstance().subscribeToTopic("wrs-gempa-alerts")
         FirebaseMessaging.getInstance().token.addOnSuccessListener { token ->
             getSharedPreferences("wrs_alerts", Context.MODE_PRIVATE)
@@ -129,8 +132,24 @@ class MainActivity : ComponentActivity() {
         WorkManager.getInstance(applicationContext).enqueueUniquePeriodicWork(
             "wrs_gempa_alerts", ExistingPeriodicWorkPolicy.KEEP, request
         )
-        setContent { WrsGempaApp() }
+        setContent {
+            WrsGempaApp(
+                incomingIntent = incomingNotificationIntent.value,
+                onIncomingIntentHandled = { incomingNotificationIntent.value = null }
+            )
+        }
     }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        incomingNotificationIntent.value = intent.takeIf(::hasNotificationRoute)
+    }
+
+    private fun hasNotificationRoute(intent: Intent): Boolean =
+        intent.hasExtra("quake_id") ||
+            intent.hasExtra("quake_time") ||
+            intent.getBooleanExtra("open_tsunami_dashboard", false)
 }
 
 private suspend fun fetchWrsData(): JSONObject = withContext(Dispatchers.IO) {
@@ -259,6 +278,28 @@ private fun quakeJson(q: Quake): JSONObject = JSONObject().apply {
     put("id", q.id)
 }
 
+private fun quakeFromNotificationIntent(intent: Intent): Quake? {
+    val rawTime = intent.getStringExtra("quake_time").orEmpty()
+    val magnitude = intent.getStringExtra("quake_magnitude").orEmpty().replace(",", ".").toDoubleOrNull() ?: return null
+    val latitude = intent.getStringExtra("quake_latitude")?.toDoubleOrNull() ?: return null
+    val longitude = intent.getStringExtra("quake_longitude")?.toDoubleOrNull() ?: return null
+    val place = intent.getStringExtra("quake_place").orEmpty()
+    if (rawTime.isBlank() || place.isBlank()) return null
+    val payload = JSONObject().apply {
+        put("key", intent.getStringExtra("quake_id").orEmpty().ifBlank { rawTime + "|" + magnitude + "|" + latitude + "|" + longitude })
+        put("time", rawTime)
+        put("magnitude", magnitude)
+        put("lat", latitude)
+        put("lon", longitude)
+        put("place", place)
+        put("depth", intent.getStringExtra("quake_depth").orEmpty().ifBlank { "—" })
+        put("potential", intent.getStringExtra("quake_potential").orEmpty().ifBlank { "Status tsunami: periksa BMKG/InaTEWS" })
+        put("felt", intent.getStringExtra("quake_felt").orEmpty())
+        put("shakemap", intent.getStringExtra("quake_shakemap").orEmpty())
+    }
+    return parseWrsQuake(payload)
+}
+
 private fun quakeFromJson(obj: JSONObject): Quake = Quake(
     date = obj.optString("date"),
     time = obj.optString("time"),
@@ -301,7 +342,10 @@ private fun tsunamiStatus(q: Quake?): Pair<String, Color> {
 
 @OptIn(ExperimentalMaterialApi::class)
 @Composable
-private fun WrsGempaApp() {
+private fun WrsGempaApp(
+    incomingIntent: Intent? = null,
+    onIncomingIntentHandled: () -> Unit = {}
+) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("wrs_alerts", Context.MODE_PRIVATE) }
     var dark by remember { mutableStateOf(false) }
@@ -323,6 +367,36 @@ private fun WrsGempaApp() {
     var nearbyAlerts by remember { mutableStateOf(prefs.getBoolean("nearby_alerts", false)) }
     var minMagnitude by remember { mutableStateOf(prefs.getString("min_magnitude", "4.0") ?: "4.0") }
     var radius by remember { mutableStateOf(prefs.getString("radius", "200 km") ?: "200 km") }
+
+    LaunchedEffect(incomingIntent, latest, quakes, history) {
+        val pending = incomingIntent ?: return@LaunchedEffect
+        val eventId = pending.getStringExtra("quake_id").orEmpty()
+        val wantsTsunami = pending.getBooleanExtra("open_tsunami_dashboard", false)
+        if (wantsTsunami && eventId.isBlank()) {
+            selected = null
+            tab = 4
+            subPage = 6
+            onIncomingIntentHandled()
+        } else if (eventId.isNotBlank() || pending.hasExtra("quake_time")) {
+            val candidates = (listOfNotNull(latest) + quakes + feltQuakes + m5Quakes + history).distinctBy(::quakeKey)
+            val target = candidates.firstOrNull { q ->
+                (eventId.isNotBlank() && (q.id == eventId || quakeKey(q) == eventId)) ||
+                    (pending.getStringExtra("quake_time").orEmpty().isNotBlank() &&
+                        q.id == pending.getStringExtra("quake_time")) ||
+                    (pending.getStringExtra("quake_place").orEmpty().isNotBlank() &&
+                        q.location.equals(pending.getStringExtra("quake_place"), ignoreCase = true) &&
+                        q.magnitude == pending.getStringExtra("quake_magnitude") &&
+                        q.time == pending.getStringExtra("quake_time"))
+            }
+            val fromPayload = target ?: quakeFromNotificationIntent(pending)
+            if (fromPayload != null) {
+                selected = fromPayload
+                subPage = -1
+                onIncomingIntentHandled()
+            }
+        }
+    }
+
 
     val refreshMutex = remember { Mutex() }
 
