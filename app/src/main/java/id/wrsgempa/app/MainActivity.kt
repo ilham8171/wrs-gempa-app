@@ -1264,7 +1264,7 @@ private fun TsunamiPage(latest: Quake?, history: List<Quake>, fg: Color, card: C
                     settings.domStorageEnabled = true
                     settings.useWideViewPort = true
                     settings.loadWithOverviewMode = true
-                    loadUrl("https://inatews.bmkg.go.id/")
+                    loadUrl("https://inatews.bmkg.go.id/web/tsunami")
                 }
             }
         )
