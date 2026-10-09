@@ -388,7 +388,12 @@ private fun WrsGempaApp(
         val pending = incomingIntent ?: return@LaunchedEffect
         val eventId = pending.getStringExtra("quake_id").orEmpty()
         val wantsTsunami = pending.getBooleanExtra("open_tsunami_dashboard", false)
-        if (wantsTsunami && pending.getStringExtra("quake_time").isNullOrBlank()) {
+        val payloadHasValidEvent = !pending.getStringExtra("quake_time").isNullOrBlank() &&
+            !pending.getStringExtra("quake_place").isNullOrBlank() &&
+            pending.getStringExtra("quake_magnitude")?.replace(",", ".")?.toDoubleOrNull() != null &&
+            pending.getStringExtra("quake_latitude")?.toDoubleOrNull() in -90.0..90.0 &&
+            pending.getStringExtra("quake_longitude")?.toDoubleOrNull() in -180.0..180.0
+        if (wantsTsunami && !payloadHasValidEvent) {
             selected = null
             tab = 4
             subPage = 6
