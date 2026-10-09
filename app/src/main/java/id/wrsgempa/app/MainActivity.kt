@@ -430,7 +430,7 @@ private fun WrsGempaApp() {
     val card = if (dark) Color(0xFF13233A) else Color.White
 
     val scope = rememberCoroutineScope()
-    val refreshAction: () -> Unit = { scope.launch { refresh() } }
+    val refreshAction: () -> Unit = { scope.launch { refresh(showProgress = true) } }
     val pullState = rememberPullRefreshState(loading, refreshAction)
 
     MaterialTheme(
@@ -463,7 +463,7 @@ private fun WrsGempaApp() {
                     subPage == 8 -> HistoryPage(history, fg, card, padding, { selected = it })
                     subPage == 9 -> ShakeMapsPage(history.filter { it.shakemap.isNotBlank() }, fg, card, padding, { selected = it })
                     else -> when (tab) {
-                        0 -> HomePage(latest, quakes, feltQuakes, loading, error, lastUpdated, fg, card, dark, { dark = !dark }, { refreshAction() }, { selected = it }, { tab = 1 }, { subPage = 6 }, padding)
+                        0 -> HomePage(latest, quakes, feltQuakes, m5Quakes.size, loading, error, lastUpdated, fg, card, dark, { dark = !dark }, { refreshAction() }, { selected = it }, { tab = 1 }, { subPage = 6 }, padding)
                         1 -> MapPage(lastUpdated, fg, padding, { subPage = 8 }, { subPage = 9 })
                         2 -> QuakeListPage(quakes, feltQuakes, m5Quakes, history.filter(::isTsunamiPotential), filter, { filter = it }, fg, card, padding, { selected = it })
                         3 -> NotificationPage(latest, quakes, bigAlerts, { bigAlerts = it; prefs.edit().putBoolean("big_alerts", it).apply() }, feltAlerts, { feltAlerts = it; prefs.edit().putBoolean("felt_alerts", it).apply() }, tsunamiAlerts, { tsunamiAlerts = it; prefs.edit().putBoolean("tsunami_alerts", it).apply() }, nearbyAlerts, { nearbyAlerts = it; prefs.edit().putBoolean("nearby_alerts", it).apply() }, minMagnitude, { minMagnitude = it; prefs.edit().putString("min_magnitude", it).apply() }, radius, { radius = it; prefs.edit().putString("radius", it).apply() }, fg, card, padding, { selected = it })
@@ -495,6 +495,7 @@ private fun HomePage(
     latest: Quake?,
     quakes: List<Quake>,
     feltQuakes: List<Quake>,
+    m5Count: Int,
     loading: Boolean,
     error: String,
     lastUpdated: String,
@@ -517,9 +518,16 @@ private fun HomePage(
             }
         }
         item {
-            Surface(color = Color(0xFFDDF7EA), shape = RoundedCornerShape(18.dp)) {
-                Text("● LIVE BMKG  •  Auto update 60 detik  •  Swipe-down untuk refresh", color = Color(0xFF11774A), fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Surface(color = Color(0xFFDDF7EA), shape = RoundedCornerShape(18.dp)) {
+                    Text("● LIVE BMKG", color = Color(0xFF11774A), fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp))
+                }
+                Column(Modifier.weight(1f)) {
+                    Text("JAM SEKARANG", color = fg.copy(alpha = .6f), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    LiveWibClock(fg)
+                }
             }
+            Text("Sinkronisasi data berjalan diam-diam setiap 60 detik. Halaman dan peta tidak dimuat ulang otomatis.", color = fg.copy(alpha = .62f), fontSize = 10.sp)
         }
         item {
             Card(colors = CardDefaults.cardColors(containerColor = Navy), shape = RoundedCornerShape(24.dp), modifier = Modifier.fillMaxWidth().clickable(enabled = latest != null) { latest?.let(open) }) {
@@ -570,7 +578,7 @@ private fun HomePage(
         }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                StatCard("M 5+", quakes.size.toString(), "Katalog BMKG", card, fg, Modifier.weight(1f))
+                StatCard("M 5+", m5Count.toString(), "15 kejadian BMKG", card, fg, Modifier.weight(1f))
                 StatCard("Dirasakan", feltQuakes.size.toString(), "Katalog BMKG", card, fg, Modifier.weight(1f))
                 StatCard("Update", lastUpdated, "WIB", card, fg, Modifier.weight(1f))
             }
@@ -658,7 +666,7 @@ private fun QuakeListPage(quakes: List<Quake>, felt: List<Quake>, m5: List<Quake
         val source = when (filter) { "Dirasakan" -> felt; "Tsunami" -> tsunami; else -> quakes }
         val shown = if (filter == "M ≥ 5.0") m5.filter { it.magnitudeValue >= 5.0 } else source
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
-            if (shown.isEmpty()) item { Text("Belum ada data. Tarik layar dari atas atau tunggu update otomatis.", color = Muted, modifier = Modifier.padding(20.dp)) }
+            if (shown.isEmpty()) item { Text("Belum ada data pada kategori ini. Pembaruan berjalan otomatis tanpa memuat ulang halaman.", color = Muted, modifier = Modifier.padding(20.dp)) }
             items(shown) { QuakeRow(it, card, fg) { open(it) } }
         }
     }
@@ -667,8 +675,6 @@ private fun QuakeListPage(quakes: List<Quake>, felt: List<Quake>, m5: List<Quake
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 private fun MapPage(lastUpdated: String, fg: Color, padding: PaddingValues, openHistory: () -> Unit, openShakemap: () -> Unit) {
-    var monitorWebView by remember { mutableStateOf<WebView?>(null) }
-    LaunchedEffect(lastUpdated) { monitorWebView?.reload() }
     Column(Modifier.fillMaxSize().padding(padding)) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
             Header(fg, "Monitoring Gempa Realtime", "Peta langsung dari WRS GEMPA milikmu")
@@ -677,7 +683,11 @@ private fun MapPage(lastUpdated: String, fg: Color, padding: PaddingValues, open
                     Text("LIVE • WRS GEMPA", color = Color(0xFF11774A), fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp))
                 }
                 Spacer(Modifier.width(8.dp))
-                Text("Auto refresh 60 detik • Update " + lastUpdated + " WIB", color = fg.copy(alpha = .68f), fontSize = 10.sp)
+                Column {
+                    Text("Jam sekarang", color = fg.copy(alpha = .6f), fontSize = 9.sp)
+                    LiveWibClock(fg)
+                    Text("Data terakhir: " + lastUpdated + " WIB", color = fg.copy(alpha = .68f), fontSize = 10.sp)
+                }
             }
         }
         Row(Modifier.padding(horizontal = 14.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -689,7 +699,6 @@ private fun MapPage(lastUpdated: String, fg: Color, padding: PaddingValues, open
             modifier = Modifier.weight(1f).fillMaxWidth(),
             factory = { ctx ->
                 WebView(ctx).apply {
-                    monitorWebView = this
                     webViewClient = WebViewClient()
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
@@ -770,7 +779,7 @@ private fun DetailPage(quake: Quake, fg: Color, card: Color, back: () -> Unit, p
                 Text("ShakeMap BMKG", color = fg, fontWeight = FontWeight.Bold, fontSize = 17.sp)
                 Card(colors = CardDefaults.cardColors(containerColor = card), shape = RoundedCornerShape(18.dp)) {
                     Column(Modifier.padding(8.dp)) {
-                        RemoteImage(if (quake.shakemap.startsWith("http")) quake.shakemap else "https://bmkg-content-inatews.storage.googleapis.com/" + quake.shakemap)
+                        RemoteImage(if (quake.shakemap.startsWith("http")) quake.shakemap else "https://static.bmkg.go.id/" + quake.shakemap)
                         Text("Peta guncangan BMKG • " + quake.shakemap, color = fg.copy(alpha = .6f), fontSize = 10.sp, modifier = Modifier.padding(6.dp))
                     }
                 }
@@ -1142,7 +1151,7 @@ private fun InfoPage(fg: Color, card: Color, padding: PaddingValues) {
                     DetailLine("Realtime", "InaTEWS BMKG — inatews.bmkg.go.id/web/realtime", fg)
                     DetailLine("Tsunami", "InaTEWS BMKG — inatews.bmkg.go.id", fg)
                     DetailLine("Peta dasar", "OpenStreetMap / CARTO pada laman InaTEWS", fg)
-                    DetailLine("Versi", "1.3.0", fg)
+                    DetailLine("Versi", "1.6.0", fg)
                 }
             }
         }
