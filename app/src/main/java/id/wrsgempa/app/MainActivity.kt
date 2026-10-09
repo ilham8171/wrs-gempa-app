@@ -73,12 +73,12 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
-private val Navy = Color(0xFF0A1730)
-private val Blue = Color(0xFF1769E0)
-private val Muted = Color(0xFF66758A)
-private val Pale = Color(0xFFF3F6FB)
-private val TsunamiRed = Color(0xFFB91C1C)
-private val TsunamiYellow = Color(0xFFFFF4CC)
+private val Navy = WrsDesignSystem.Navy
+private val Blue = WrsDesignSystem.Blue
+private val Muted = WrsDesignSystem.Muted
+private val Pale = WrsDesignSystem.Pale
+private val TsunamiRed = WrsDesignSystem.TsunamiRed
+private val TsunamiYellow = WrsDesignSystem.TsunamiYellow
 
 private fun wibClockText(): String =
     java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale("id", "ID"))
@@ -1799,7 +1799,7 @@ private fun InfoPage(fg: Color, card: Color, padding: PaddingValues) {
             Card(colors = CardDefaults.cardColors(containerColor = card), shape = RoundedCornerShape(18.dp)) {
                 Column(Modifier.padding(16.dp)) {
                     Text("Sumber resmi", color = fg, fontWeight = FontWeight.Bold)
-                    DetailLine("Gempa", "BMKG — data.bmkg.go.id", fg)
+                    DetailLine("Gempa", "BMKG — data.bmkg.go.id/gempabumi", fg)
                     DetailLine("Realtime", "InaTEWS BMKG — inatews.bmkg.go.id/web/realtime", fg)
                     DetailLine("Tsunami", "InaTEWS BMKG — inatews.bmkg.go.id", fg)
                     DetailLine("Peta dasar", "OpenStreetMap / CARTO pada laman InaTEWS", fg)
@@ -1820,7 +1820,7 @@ private fun InfoPage(fg: Color, card: Color, padding: PaddingValues) {
                 Row(Modifier.padding(14.dp), verticalAlignment = Alignment.Top) {
                     Icon(Icons.Default.Warning, null, tint = Color(0xFFB85C00))
                     Spacer(Modifier.width(8.dp))
-                    Text("Aplikasi ini membantu pemantauan dan arsip. Untuk keputusan keselamatan, ikuti peringatan resmi BMKG/InaTEWS dan petugas berwenang.", color = Color(0xFF7A3F00), fontSize = 12.sp)
+                    Text(WrsDataSources.SAFETY_NOTE, color = Color(0xFF7A3F00), fontSize = 12.sp)
                 }
             }
         }
