@@ -372,7 +372,7 @@ private fun WrsGempaApp(
         val pending = incomingIntent ?: return@LaunchedEffect
         val eventId = pending.getStringExtra("quake_id").orEmpty()
         val wantsTsunami = pending.getBooleanExtra("open_tsunami_dashboard", false)
-        if (wantsTsunami && eventId.isBlank()) {
+        if (wantsTsunami && pending.getStringExtra("quake_time").isNullOrBlank()) {
             selected = null
             tab = 4
             subPage = 6
@@ -669,8 +669,8 @@ private fun HomePage(
                     Box(Modifier.fillMaxWidth().height(125.dp).background(Navy, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Icon(Icons.Default.Map, null, tint = Color(0xFF72C6B2), modifier = Modifier.size(40.dp))
-                            Text("Peta realtime 200 kejadian InaTEWS", color = Color.White, fontWeight = FontWeight.SemiBold)
-                            Text("Episenter • magnitudo • kedalaman • aliran kejadian", color = Color(0xFFB9D4FF), fontSize = 10.sp)
+                            Text("Peta interaktif realtime", color = Color.White, fontWeight = FontWeight.SemiBold)
+                            Text("Ketuk untuk membuka monitoring WRS GEMPA", color = Color(0xFFB9D4FF), fontSize = 10.sp)
                         }
                     }
                 }
@@ -1058,7 +1058,7 @@ private fun ShakeMapsPage(items: List<Quake>, fg: Color, card: Color, padding: P
             Card(colors = CardDefaults.cardColors(containerColor = card), shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth().clickable { open(q) }) {
                 Column(Modifier.padding(8.dp)) {
                     Text("M " + q.magnitude + " • " + q.location, color = fg, fontWeight = FontWeight.Bold, modifier = Modifier.padding(8.dp))
-                    RemoteImage(if (q.shakemap.startsWith("http")) q.shakemap else "https://bmkg-content-inatews.storage.googleapis.com/" + q.shakemap)
+                    RemoteImage(if (q.shakemap.startsWith("http")) q.shakemap else "https://static.bmkg.go.id/" + q.shakemap)
                 }
             }
         }
