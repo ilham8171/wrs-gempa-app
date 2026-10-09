@@ -927,12 +927,55 @@ private fun QuakeListPage(quakes: List<Quake>, felt: List<Quake>, m5: List<Quake
 
 @Composable
 private fun MapPage(lastUpdated: String, quakes: List<Quake>, fg: Color, card: Color, padding: PaddingValues, openHistory: () -> Unit, openShakemap: () -> Unit, openWeather: () -> Unit) {
-    val pulse = rememberInfiniteTransition(label = "quake-pulse")
-    val scale by pulse.animateFloat(1f, 2.5f, infiniteRepeatable(tween(1500), RepeatMode.Restart), label = "pulse-scale")
-    val alpha by pulse.animateFloat(.65f, .04f, infiniteRepeatable(tween(1500), RepeatMode.Restart), label = "pulse-alpha")
+    val markersJson = remember(quakes) {
+        JSONArray().apply {
+            quakes.filter { it.latitude in -12.0..8.0 && it.longitude in 94.0..142.0 }.take(120).forEach { q ->
+                put(JSONObject()
+                    .put("lat", q.latitude)
+                    .put("lon", q.longitude)
+                    .put("mag", q.magnitude)
+                    .put("place", q.location)
+                    .put("depth", q.depth)
+                    .put("time", q.time))
+            }
+        }.toString()
+    }
+    val mapHtml = remember(markersJson) {
+        """
+        <!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+        <style>
+          html,body,#map{height:100%;width:100%;margin:0;background:#e8f0f5;font-family:Arial,sans-serif}
+          .leaflet-popup-content-wrapper{border-radius:12px}.leaflet-popup-content{margin:12px;font-size:13px;line-height:1.5}
+          .quake-dot{border:2px solid white;border-radius:50%;box-shadow:0 1px 8px #182b45aa;text-align:center;color:white;font-weight:800;font-size:11px;display:flex;align-items:center;justify-content:center}
+          .map-title{background:#071b31ed;color:white;padding:10px 13px;border-radius:12px;font-size:12px;box-shadow:0 2px 12px #0003}
+          .map-title small{display:block;color:#c8ddf4;font-weight:400;margin-top:3px}
+        </style></head><body><div id="map"></div>
+        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+        <script>
+          const quakes = $markersJson;
+          const map = L.map('map',{zoomControl:false,preferCanvas:true}).setView([-2.5,118],4.4);
+          L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+            maxZoom:18, attribution:'&copy; OpenStreetMap contributors'
+          }).addTo(map);
+          L.control.zoom({position:'bottomright'}).addTo(map);
+          const title=L.control({position:'topleft'});
+          title.onAdd=function(){const d=L.DomUtil.create('div','map-title');d.innerHTML='PETA GEMPA INDONESIA<small>'+quakes.length+' kejadian terpetakan</small>';return d;};title.addTo(map);
+          quakes.forEach((q,i)=>{
+            const mag=Number(q.mag)||0, size=Math.max(24,Math.min(38,22+mag*2));
+            const color=mag>=5?'#d92d3a':mag>=3?'#f08a24':'#1976d2';
+            const icon=L.divIcon({className:'',html:'<div class="quake-dot" style="width:'+size+'px;height:'+size+'px;background:'+color+'">'+mag.toFixed(1)+'</div>',iconSize:[size,size],iconAnchor:[size/2,size/2]});
+            const marker=L.marker([q.lat,q.lon],{icon}).addTo(map);
+            const place=String(q.place||'Lokasi tidak tersedia').replace(/[<>&"]/g,' ');
+            marker.bindPopup('<b>Gempa M '+mag.toFixed(1)+'</b><br>'+place+'<br>Kedalaman: '+(q.depth||'-')+'<br><small>'+String(q.time||'')+'</small>');
+          });
+          if(quakes.length===0){L.popup().setLatLng([-2.5,118]).setContent('Belum ada kejadian gempa untuk ditampilkan.').openOn(map);}
+        </script></body></html>
+        """.trimIndent()
+    }
     Column(Modifier.fillMaxSize().padding(padding)) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-            Header(fg, "Monitoring Gempa Realtime", "Peta native • data kejadian tersinkron")
+            Header(fg, "Monitoring Gempa Realtime", "Peta geografis • data dari WRS GEMPA")
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(color = Color(0xFFDDF7EA), shape = RoundedCornerShape(20.dp)) {
                     Text("LIVE • WRS GEMPA", color = Color(0xFF11774A), fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp))
@@ -946,35 +989,27 @@ private fun MapPage(lastUpdated: String, quakes: List<Quake>, fg: Color, card: C
             OutlinedButton(onClick = openShakemap, modifier = Modifier.weight(1f)) { Icon(Icons.Default.Image, null); Text("ShakeMaps", fontSize = 10.sp) }
             OutlinedButton(onClick = openWeather, modifier = Modifier.weight(1f)) { Icon(Icons.Default.Cloud, null); Text("Cuaca", fontSize = 10.sp) }
         }
-        Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF071B31)), shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth().weight(1f).padding(12.dp)) {
-            Box(Modifier.fillMaxSize()) {
-                Canvas(Modifier.fillMaxSize()) {
-                    val w = size.width; val h = size.height
-                    val c = drawContext.canvas.nativeCanvas
-                    val p = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.argb(30,100,190,220); strokeWidth = 1f }
-                    for (i in 1..7) { c.drawLine(w*i/8f,0f,w*i/8f,h,p); c.drawLine(0f,h*i/8f,w,h*i/8f,p) }
-                    p.color = android.graphics.Color.argb(75,51,153,132)
-                    listOf(floatArrayOf(.08f,.38f,.32f,.07f),floatArrayOf(.36f,.52f,.28f,.04f),floatArrayOf(.66f,.36f,.13f,.07f),floatArrayOf(.72f,.62f,.16f,.08f),floatArrayOf(.43f,.72f,.13f,.04f),floatArrayOf(.88f,.78f,.07f,.1f)).forEach { v -> c.drawOval(w*v[0],h*v[1],w*(v[0]+v[2]),h*(v[1]+v[3]),p) }
-                    quakes.filter { it.latitude in -12.0..8.0 && it.longitude in 94.0..142.0 }.take(100).forEachIndexed { i,q ->
-                        val x=((q.longitude-94.0)/48.0*w).toFloat(); val y=((8.0-q.latitude)/20.0*h).toFloat()
-                        if(i==0) { p.color=android.graphics.Color.argb((alpha*255).toInt().coerceIn(0,255),255,40,50); c.drawCircle(x,y,7f*scale,p) }
-                        p.color=android.graphics.Color.rgb(255,55,65); c.drawCircle(x,y,if(i==0) 7f else 4f,p)
-                        p.color=android.graphics.Color.WHITE; c.drawCircle(x,y,1.5f,p)
+        Card(colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F0F5)), shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth().weight(1f).padding(12.dp)) {
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { context ->
+                    WebView(context).apply {
+                        settings.javaScriptEnabled = true
+                        settings.domStorageEnabled = true
+                        settings.loadsImagesAutomatically = true
+                        webViewClient = WebViewClient()
+                        loadDataWithBaseURL("https://wrsgempa.netlify.app/", mapHtml, "text/html", "UTF-8", null)
+                    }
+                },
+                update = { view ->
+                    if (view.tag != markersJson) {
+                        view.tag = markersJson
+                        view.loadDataWithBaseURL("https://wrsgempa.netlify.app/", mapHtml, "text/html", "UTF-8", null)
                     }
                 }
-                Column(Modifier.align(Alignment.TopStart).padding(14.dp)) {
-                    Text("INDONESIA • MONITORING", color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 12.sp)
-                    Text("Titik merah = lokasi kejadian gempa", color = Color(0xFFB9D4FF), fontSize = 10.sp)
-                }
-                Surface(Modifier.align(Alignment.BottomStart).padding(12.dp), color = Color(0xDD0A1730), shape = RoundedCornerShape(12.dp)) {
-                    Column(Modifier.padding(10.dp)) {
-                        Text("Kejadian terpetakan: ${quakes.count { it.latitude in -12.0..8.0 && it.longitude in 94.0..142.0 }}", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        Text("Skema orientasi, bukan peta navigasi presisi.", color = Color(0xFFB9D4FF), fontSize = 9.sp)
-                    }
-                }
-            }
+            )
         }
-        Text("Data kejadian WRS GEMPA/BMKG. Untuk keputusan keselamatan, ikuti pengumuman resmi BMKG.", color = fg.copy(alpha = .65f), fontSize = 10.sp, modifier = Modifier.padding(12.dp))
+        Text("Peta memakai OpenStreetMap. Data kejadian berasal dari WRS GEMPA; ikuti pengumuman resmi BMKG untuk keputusan keselamatan.", color = fg.copy(alpha = .65f), fontSize = 10.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
     }
 }
 
