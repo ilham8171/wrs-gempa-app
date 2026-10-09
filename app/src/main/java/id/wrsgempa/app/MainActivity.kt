@@ -1803,7 +1803,15 @@ private fun InfoPage(fg: Color, card: Color, padding: PaddingValues) {
                     DetailLine("Realtime", "InaTEWS BMKG — inatews.bmkg.go.id/web/realtime", fg)
                     DetailLine("Tsunami", "InaTEWS BMKG — inatews.bmkg.go.id", fg)
                     DetailLine("Peta dasar", "OpenStreetMap / CARTO pada laman InaTEWS", fg)
-                    DetailLine("Versi", "1.6.0", fg)
+                    DetailLine("Versi", "1.7.0", fg)
+                    DetailLine("Pengembang", "© Powered by Ilham", fg)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "Kredit sumber: data gempa dan prakiraan cuaca merujuk layanan resmi BMKG. Informasi tsunami harus dikonfirmasi melalui InaTEWS BMKG.",
+                        color = fg.copy(alpha = .72f),
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp
+                    )
                 }
             }
         }
