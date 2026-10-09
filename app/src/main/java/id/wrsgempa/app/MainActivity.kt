@@ -723,7 +723,7 @@ private fun HomePage(
     openTsunami: () -> Unit,
     padding: PaddingValues
 ) {
-    val tsunami = latest?.let(::isTsunamiPotential) == true
+    val tsunami = false // Event potential is not proof of an active official warning.
     LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -792,7 +792,7 @@ private fun HomePage(
         }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                StatCard("M 5+", m5Count.toString(), "15 kejadian BMKG", card, fg, Modifier.weight(1f))
+                StatCard("M 5+", m5Count.toString(), "Katalog tersedia", card, fg, Modifier.weight(1f))
                 StatCard("Dirasakan", feltQuakes.size.toString(), "Katalog BMKG", card, fg, Modifier.weight(1f))
                 StatCard("Update", lastUpdated, "WIB", card, fg, Modifier.weight(1f))
             }
@@ -1024,7 +1024,7 @@ private fun DetailPage(quake: Quake, fg: Color, card: Color, back: () -> Unit, p
                     DetailLine("Kedalaman", quake.depth, fg)
                     DetailLine("Magnitudo", "M " + quake.magnitude, fg)
                     DetailLine("Dirasakan", quake.felt.ifBlank { "Tidak ada data dirasakan" }, fg)
-                    DetailLine("Potensi tsunami", quake.tsunami.ifBlank { "Tidak ada keterangan" }, fg)
+                    DetailLine("Keterangan tsunami pada data kejadian", quake.tsunami.ifBlank { "Tidak tercantum pada data kejadian ini." }, fg)
                     DetailLine("Sumber data", quake.source, fg)
                     Text(status, color = statusPair.second, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(top = 8.dp))
                 }
