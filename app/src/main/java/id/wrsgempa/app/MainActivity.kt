@@ -639,8 +639,8 @@ private fun WrsGempaApp(
             containerColor = bg,
             bottomBar = {
                 NavigationBar(containerColor = card) {
-                    val labels = listOf("Beranda", "Peta", "Gempa", "Alert", "Lainnya")
-                    val icons = listOf(Icons.Default.Home, Icons.Default.Map, Icons.Default.ShowChart, Icons.Default.Notifications, Icons.Default.MoreHoriz)
+                    val labels = listOf("Beranda", "Peta", "Data", "Peringatan", "Menu")
+                    val icons = listOf(Icons.Default.Home, Icons.Default.Map, Icons.Default.Public, Icons.Default.NotificationsActive, Icons.Default.Menu)
                     labels.forEachIndexed { index, label ->
                         NavigationBarItem(
                             selected = tab == index && subPage == -1,
