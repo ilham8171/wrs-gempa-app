@@ -180,7 +180,7 @@ private suspend fun fetchBmkgQuakes(fileName: String): List<Quake> = withContext
         val root = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
         val value = root.optJSONObject("Infogempa")?.opt("gempa")
         when (value) {
-            is JSONObject -> listOf(parseQuake(value))
+            is JSONObject -> listOfNotNull(parseQuake(value))
             is JSONArray -> (0 until value.length()).mapNotNull { i -> value.optJSONObject(i)?.let(::parseQuake) }
             else -> emptyList()
         }
@@ -222,29 +222,54 @@ private fun parseWrsQuake(obj: JSONObject): Quake? {
         obj.optString("key", rawTime + "|" + magnitude + "|" + lat + "|" + lon),
         obj.optString("source", "WRS GEMPA"))
 }
-private fun parseCoordinate(raw: String, isLatitude: Boolean): Double? {
-    val cleaned = raw.replace(" LS", "").replace(" LU", "").replace(" BT", "").replace(" BB", "").replace(",", ".")
+private fun parseCoordinate(raw: String): Double? {
+    val cleaned = raw.trim()
+        .replace(" LS", "", ignoreCase = true)
+        .replace(" LU", "", ignoreCase = true)
+        .replace(" BT", "", ignoreCase = true)
+        .replace(" BB", "", ignoreCase = true)
+        .replace(",", ".")
         .filter { it.isDigit() || it == '.' || it == '-' }
         .toDoubleOrNull() ?: return null
     return when {
-        raw.contains("LS") || raw.contains("BB") -> -kotlin.math.abs(cleaned)
-        isLatitude -> kotlin.math.abs(cleaned)
-        else -> kotlin.math.abs(cleaned)
+        raw.contains("LS", true) || raw.contains("BB", true) -> -kotlin.math.abs(cleaned)
+        raw.contains("LU", true) || raw.contains("BT", true) -> kotlin.math.abs(cleaned)
+        else -> cleaned
     }
 }
 
-private fun parseQuake(obj: JSONObject): Quake {
-    val coord = obj.optString("Coordinates", "")
+private fun parseQuake(obj: JSONObject): Quake? {
+    val magnitudeText = obj.optString("Magnitude", "").replace(",", ".").trim()
+    val magnitude = magnitudeText.toDoubleOrNull() ?: return null
+    val coord = obj.optString("Coordinates", "").trim()
     val coordParts = coord.split(",")
-    val lat = parseCoordinate(obj.optString("Lintang"), true) ?: coordParts.getOrNull(0)?.trim()?.toDoubleOrNull() ?: -2.5
-    val lon = parseCoordinate(obj.optString("Bujur"), false) ?: coordParts.getOrNull(1)?.trim()?.toDoubleOrNull() ?: 118.0
+    val lat = parseCoordinate(obj.optString("Lintang", "")) ?: coordParts.getOrNull(0)?.trim()?.toDoubleOrNull()
+        ?: return null
+    val lon = parseCoordinate(obj.optString("Bujur", "")) ?: coordParts.getOrNull(1)?.trim()?.toDoubleOrNull()
+        ?: return null
+    if (!magnitude.isFinite() || magnitude !in 0.0..10.0 ||
+        !lat.isFinite() || lat !in -90.0..90.0 ||
+        !lon.isFinite() || lon !in -180.0..180.0) return null
+
+    val date = obj.optString("Tanggal", "").trim()
+    val time = obj.optString("Jam", "").trim()
+    val location = obj.optString("Wilayah", "").trim()
+    if (date.isBlank() || time.isBlank() || location.isBlank()) return null
+
+    val rawDepth = obj.optString("Kedalaman", "—").trim()
+    val depth = when {
+        rawDepth.isBlank() -> "—"
+        rawDepth.contains("km", true) -> rawDepth
+        else -> "$rawDepth km"
+    }
+    val displayCoordinates = coord.ifBlank { "%.3f, %.3f".format(java.util.Locale.US, lat, lon) }
     return Quake(
-        date = obj.optString("Tanggal", "Tanggal tidak tersedia"),
-        time = obj.optString("Jam", ""),
-        magnitude = obj.optString("Magnitude", "—"),
-        depth = obj.optString("Kedalaman", "—"),
-        location = obj.optString("Wilayah", "Lokasi tidak tersedia"),
-        coordinates = coord.ifBlank { lat.toString() + "," + lon },
+        date = date,
+        time = time,
+        magnitude = String.format(java.util.Locale.US, "%.1f", magnitude),
+        depth = depth,
+        location = location,
+        coordinates = displayCoordinates,
         latitude = lat,
         longitude = lon,
         tsunami = obj.optString("Potensi", ""),
@@ -258,7 +283,7 @@ private fun parseQuake(obj: JSONObject): Quake {
 private fun quakeArray(root: JSONObject): List<Quake> {
     val value = root.optJSONObject("Infogempa")?.opt("gempa") ?: return emptyList()
     return when (value) {
-        is JSONObject -> listOf(parseQuake(value))
+        is JSONObject -> listOfNotNull(parseQuake(value))
         is JSONArray -> (0 until value.length()).mapNotNull { value.optJSONObject(it)?.let(::parseQuake) }
         else -> emptyList()
     }
