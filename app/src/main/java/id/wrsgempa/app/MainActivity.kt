@@ -23,6 +23,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var webView: WebView
     private var fileChooserCallback: ValueCallback<Array<Uri>>? = null
 
+    private val notificationPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* user choice is respected */ }
+
     private val filePicker = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         fileChooserCallback?.onReceiveValue(if (uri != null) arrayOf(uri) else null)
         fileChooserCallback = null
@@ -97,7 +99,7 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
-            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 5107)
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
 
