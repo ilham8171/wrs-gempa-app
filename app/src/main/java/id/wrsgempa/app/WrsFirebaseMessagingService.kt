@@ -11,6 +11,7 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -105,13 +106,37 @@ class WrsFirebaseMessagingService : FirebaseMessagingService() {
                 val magnitudeText = if (mag > 0) "Magnitudo $mag. " else ""
                 "Peringatan gempa. $magnitudeText$body"
             }
-            lateinit var engine: TextToSpeech
+            var engine: TextToSpeech? = null
             engine = TextToSpeech(applicationContext) { status ->
+                val tts = engine ?: return@TextToSpeech
                 if (status == TextToSpeech.SUCCESS) {
-                    val languageResult = engine.setLanguage(Locale("id", "ID"))
+                    val languageResult = tts.setLanguage(Locale("id", "ID"))
                     if (languageResult >= TextToSpeech.LANG_AVAILABLE) {
-                        engine.speak(spoken, TextToSpeech.QUEUE_FLUSH, null, "wrs-alert-${System.currentTimeMillis()}")
+                        tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                            override fun onStart(utteranceId: String?) = Unit
+                            override fun onDone(utteranceId: String?) {
+                                tts.shutdown()
+                            }
+                            @Deprecated("Deprecated in Java")
+                            override fun onError(utteranceId: String?) {
+                                tts.shutdown()
+                            }
+                            override fun onError(utteranceId: String?, errorCode: Int) {
+                                tts.shutdown()
+                            }
+                        })
+                        val result = tts.speak(
+                            spoken,
+                            TextToSpeech.QUEUE_FLUSH,
+                            null,
+                            "wrs-alert-${System.currentTimeMillis()}"
+                        )
+                        if (result == TextToSpeech.ERROR) tts.shutdown()
+                    } else {
+                        tts.shutdown()
                     }
+                } else {
+                    tts.shutdown()
                 }
             }
         }
