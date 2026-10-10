@@ -22,8 +22,20 @@ import com.google.firebase.messaging.FirebaseMessaging
 class MainActivity : ComponentActivity() {
     private lateinit var webView: WebView
     private var fileChooserCallback: ValueCallback<Array<Uri>>? = null
+    private var pendingGeoOrigin: String? = null
+    private var pendingGeoCallback: GeolocationPermissions.Callback? = null
 
-    private val notificationPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* user choice is respected */ }
+    private val notificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* respect the user's choice */ }
+
+    private val locationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
+            val granted = grants[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+                grants[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+            pendingGeoCallback?.invoke(pendingGeoOrigin, granted, false)
+            pendingGeoCallback = null
+            pendingGeoOrigin = null
+        }
 
     private val filePicker = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         fileChooserCallback?.onReceiveValue(if (uri != null) arrayOf(uri) else null)
@@ -32,8 +44,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        // Native FCM subscription is independent of the website's existing UI and code.
         FirebaseMessaging.getInstance().subscribeToTopic("wrs-gempa-alerts")
         requestNotificationPermissionIfNeeded()
 
@@ -70,8 +80,25 @@ class MainActivity : ComponentActivity() {
                 origin: String,
                 callback: GeolocationPermissions.Callback
             ) {
-                val trusted = Uri.parse(origin).host == "wrsgempa.netlify.app"
-                callback.invoke(origin, trusted, false)
+                if (Uri.parse(origin).host != "wrsgempa.netlify.app") {
+                    callback.invoke(origin, false, false)
+                    return
+                }
+                val fineGranted = ContextCompat.checkSelfPermission(
+                    this@MainActivity, Manifest.permission.ACCESS_FINE_LOCATION
+                ) == PackageManager.PERMISSION_GRANTED
+                val coarseGranted = ContextCompat.checkSelfPermission(
+                    this@MainActivity, Manifest.permission.ACCESS_COARSE_LOCATION
+                ) == PackageManager.PERMISSION_GRANTED
+                if (fineGranted || coarseGranted) {
+                    callback.invoke(origin, true, false)
+                } else {
+                    pendingGeoOrigin = origin
+                    pendingGeoCallback = callback
+                    locationPermissionLauncher.launch(
+                        arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+                    )
+                }
             }
 
             override fun onShowFileChooser(
@@ -112,6 +139,8 @@ class MainActivity : ComponentActivity() {
         }
         fileChooserCallback?.onReceiveValue(null)
         fileChooserCallback = null
+        pendingGeoCallback = null
+        pendingGeoOrigin = null
         super.onDestroy()
     }
 }
