@@ -57,6 +57,11 @@ class MainActivity : ComponentActivity() {
         val view = WebView(this)
         webView = view
         view.settings.javaScriptEnabled = true
+        view.settings.setSupportZoom(true)
+        view.settings.builtInZoomControls = true
+        view.settings.displayZoomControls = false
+        view.settings.useWideViewPort = true
+        view.settings.loadWithOverviewMode = true
         view.settings.domStorageEnabled = true
         view.settings.databaseEnabled = true
         view.settings.loadsImagesAutomatically = true
