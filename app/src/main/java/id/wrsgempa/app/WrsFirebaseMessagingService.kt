@@ -95,21 +95,23 @@ class WrsFirebaseMessagingService : FirebaseMessagingService() {
             }
         }
 
-        // Speak only when this app receives a data push; system notification sound remains as fallback.
+        // Speak alert details aloud; Android TTS uses the Indonesian voice if installed.
         runCatching {
             val prefs = getSharedPreferences("wrs_alerts", Context.MODE_PRIVATE)
             if (!prefs.getBoolean("tts_enabled", true)) return@runCatching
             val spoken = if (tsunami) {
-                "Peringatan tsunami. Ikuti instruksi resmi BMKG dan segera perhatikan arahan evakuasi. $body"
+                "Peringatan tsunami. Ikuti instruksi resmi BMKG dan arahan evakuasi. $body"
             } else {
-                val magnitudeText = if (mag > 0) "Magnitudo $mag." else ""
-                "Peringatan gempa. $magnitudeText $body"
+                val magnitudeText = if (mag > 0) "Magnitudo $mag. " else ""
+                "Peringatan gempa. $magnitudeText$body"
             }
-            val tts = TextToSpeech(applicationContext) { status ->
+            lateinit var engine: TextToSpeech
+            engine = TextToSpeech(applicationContext) { status ->
                 if (status == TextToSpeech.SUCCESS) {
-                    val engine = TextToSpeech(applicationContext) { }
-                    engine.language = Locale("id", "ID")
-                    engine.speak(spoken, TextToSpeech.QUEUE_FLUSH, null, "wrs-alert-${System.currentTimeMillis()}")
+                    val languageResult = engine.setLanguage(Locale("id", "ID"))
+                    if (languageResult >= TextToSpeech.LANG_AVAILABLE) {
+                        engine.speak(spoken, TextToSpeech.QUEUE_FLUSH, null, "wrs-alert-${System.currentTimeMillis()}")
+                    }
                 }
             }
         }
