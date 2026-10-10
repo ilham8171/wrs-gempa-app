@@ -124,13 +124,29 @@ class MainActivity : ComponentActivity() {
             }
         }
         setContentView(view)
-        view.loadUrl("https://wrsgempa.netlify.app")
+        view.loadUrl(buildStartUrl(intent))
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (webView.canGoBack()) webView.goBack() else finish()
             }
         })
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (::webView.isInitialized) {
+            val quakeId = intent.getStringExtra("quake_id").orEmpty()
+            if (quakeId.isNotBlank()) webView.loadUrl(buildStartUrl(intent))
+        }
+    }
+
+    private fun buildStartUrl(intent: Intent?): String {
+        val base = "https://wrsgempa.netlify.app"
+        val quakeId = intent?.getStringExtra("quake_id").orEmpty()
+        if (quakeId.isBlank()) return base
+        return base + "/?quake=" + Uri.encode(quakeId)
     }
 
     private fun scheduleEarthquakeChecks() {
