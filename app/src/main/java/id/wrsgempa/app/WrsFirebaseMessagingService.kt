@@ -209,7 +209,7 @@ class WrsFirebaseMessagingService : FirebaseMessagingService() {
 
     companion object {
         private const val TOPIC = "wrs-gempa-alerts"
-        private const val QUAKE_CHANNEL_ID = "wrs_gempa_fcm_v2"
-        private const val TSUNAMI_CHANNEL_ID = "wrs_tsunami_fcm_v2"
+        private const val QUAKE_CHANNEL_ID = "wrs_gempa_fcm_v3"
+        private const val TSUNAMI_CHANNEL_ID = "wrs_tsunami_fcm_v3"
     }
 }
