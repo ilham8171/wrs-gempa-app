@@ -7,6 +7,10 @@ import android.content.Context
 import android.content.Intent
 import android.media.AudioAttributes
 import android.media.RingtoneManager
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
+import android.speech.tts.TextToSpeech
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -55,6 +59,60 @@ class WrsFirebaseMessagingService : FirebaseMessagingService() {
             ?: data["message"]
             ?: "Ada pembaruan informasi gempa. Buka WRS GEMPA untuk melihat detail."
         showNotification(title, body, data)
+        announceAndVibrate(title, body, data)
+    }
+
+    private fun announceAndVibrate(title: String, body: String, data: Map<String, String>) {
+        val category = first(data, "category", "type").lowercase(Locale.ROOT)
+        val mag = first(data, "magnitude", "Magnitude", "mag").toDoubleOrNull() ?: 0.0
+        val tsunami = category.contains("tsunami") ||
+            title.contains("tsunami", ignoreCase = true) ||
+            body.contains("peringatan dini tsunami", ignoreCase = true) ||
+            body.contains("warning tsunami", ignoreCase = true)
+
+        // Vibration runs for both foreground and background FCM delivery.
+        val pattern = when {
+            tsunami -> longArrayOf(0, 900, 180, 900, 180, 1200, 250, 1200)
+            mag >= 6.0 -> longArrayOf(0, 700, 150, 700, 150, 900)
+            mag >= 4.5 -> longArrayOf(0, 450, 180, 450, 180, 650)
+            mag > 0.0 -> longArrayOf(0, 180, 150, 180)
+            else -> longArrayOf(0, 250, 150, 250)
+        }
+        runCatching {
+            val vibrator: Vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                (getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager).defaultVibrator
+            } else {
+                @Suppress("DEPRECATION")
+                getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+            }
+            if (vibrator.hasVibrator()) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
+                } else {
+                    @Suppress("DEPRECATION")
+                    vibrator.vibrate(pattern, -1)
+                }
+            }
+        }
+
+        // Speak only when this app receives a data push; system notification sound remains as fallback.
+        runCatching {
+            val prefs = getSharedPreferences("wrs_alerts", Context.MODE_PRIVATE)
+            if (!prefs.getBoolean("tts_enabled", true)) return@runCatching
+            val spoken = if (tsunami) {
+                "Peringatan tsunami. Ikuti instruksi resmi BMKG dan segera perhatikan arahan evakuasi. $body"
+            } else {
+                val magnitudeText = if (mag > 0) "Magnitudo $mag." else ""
+                "Peringatan gempa. $magnitudeText $body"
+            }
+            val tts = TextToSpeech(applicationContext) { status ->
+                if (status == TextToSpeech.SUCCESS) {
+                    val engine = TextToSpeech(applicationContext) { }
+                    engine.language = Locale("id", "ID")
+                    engine.speak(spoken, TextToSpeech.QUEUE_FLUSH, null, "wrs-alert-${System.currentTimeMillis()}")
+                }
+            }
+        }
     }
 
     private fun showNotification(title: String, body: String, data: Map<String, String>) {
